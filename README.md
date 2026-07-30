@@ -86,4 +86,4 @@ If a rule keeps getting violated, promote it from prose to a **hook** in `.claud
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).

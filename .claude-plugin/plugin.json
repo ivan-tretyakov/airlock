@@ -7,7 +7,7 @@
   },
   "homepage": "https://github.com/ivan-tretyakov/airlock",
   "repository": "https://github.com/ivan-tretyakov/airlock",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "workflow",
     "process",
