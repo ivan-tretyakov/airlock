@@ -1,0 +1,14 @@
+{
+  "name": "devflow-marketplace",
+  "owner": {
+    "name": "Ivan Tretyakov"
+  },
+  "plugins": [
+    {
+      "name": "devflow",
+      "source": ".",
+      "description": "Lightweight structured dev flow: brainstorm → plan → ship, plus debug.",
+      "version": "1.0.0"
+    }
+  ]
+}
