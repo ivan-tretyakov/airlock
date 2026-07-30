@@ -1,12 +1,13 @@
 {
   "name": "devflow-marketplace",
+  "description": "Lightweight, structured development workflows for Claude Code — scope gates, subagent-ready plans, and evidence before done.",
   "owner": {
     "name": "Ivan Tretyakov"
   },
   "plugins": [
     {
       "name": "devflow",
-      "source": ".",
+      "source": "./",
       "description": "Lightweight structured dev flow: brainstorm → plan → ship, plus debug.",
       "version": "1.0.0"
     }
