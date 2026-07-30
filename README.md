@@ -1,8 +1,8 @@
-# devflow
+# airlock
 
 A lightweight, structured development flow for [Claude Code](https://claude.com/claude-code), packaged as a plugin.
 
-Four skills that hold the gates which actually prevent failure — a scope gate before code, subagent-ready plans, evidence before "done" — without the ceremony of a heavyweight process framework.
+**One door at a time.** Nothing crosses until the chamber is sealed and cleared: a scope gate before code, subagent-ready plans, evidence before "done" — without the ceremony of a heavyweight process framework.
 
 ```
 brainstorm  →  plan  →  ship
@@ -12,10 +12,10 @@ brainstorm  →  plan  →  ship
 
 | Skill | Fires when | What it does |
 |---|---|---|
-| **`/devflow:brainstorm`** | starting a feature, system, redesign, tool — anything with a design choice | Design + **scope gate**: batched questions → 2–3 approaches with a recommendation → approval → a design doc carrying a **scope contract**. Hands off to `plan`. |
-| **`/devflow:plan`** | after scope approval / at the start of an implementation session | Approved design → phased **TDD** plan with a disjoint **file contract** and a per-task **model/parallel-group execution table**. Then **asks: inline or subagents?** |
-| **`/devflow:ship`** | work is finished / "commit this" | Green suite + **evidence, not assertion** + protects irreplaceable local state + commit discipline + diff audited against the contract. |
-| **`/devflow:debug`** | unclear test failure, regression, a fix that didn't hold | Reproduce deterministically → isolate → one hypothesis at a time → verify → lock in as a regression test. |
+| **`/airlock:brainstorm`** | starting a feature, system, redesign, tool — anything with a design choice | Design + **scope gate**: batched questions → 2–3 approaches with a recommendation → approval → a design doc carrying a **scope contract**. Hands off to `plan`. |
+| **`/airlock:plan`** | after scope approval / at the start of an implementation session | Approved design → phased **TDD** plan with a disjoint **file contract** and a per-task **model/parallel-group execution table**. Then **asks: inline or subagents?** |
+| **`/airlock:ship`** | work is finished / "commit this" | Green suite + **evidence, not assertion** + protects irreplaceable local state + commit discipline + diff audited against the contract. |
+| **`/airlock:debug`** | unclear test failure, regression, a fix that didn't hold | Reproduce deterministically → isolate → one hypothesis at a time → verify → lock in as a regression test. |
 
 ## Why these four
 
@@ -44,17 +44,17 @@ Nothing was disobeyed. The **approach choice was never signed off** and the **bl
 
 ```bash
 # once per machine
-/plugin marketplace add ivan-tretyakov/claude-devflow
-/plugin install devflow@devflow-marketplace
+/plugin marketplace add ivan-tretyakov/airlock
+/plugin install airlock@airlock-marketplace
 ```
 
-Then in any project, the skills are available as `/devflow:brainstorm`, `/devflow:plan`, `/devflow:ship`, `/devflow:debug` — and Claude will auto-invoke them when a request matches.
+Then in any project, the skills are available as `/airlock:brainstorm`, `/airlock:plan`, `/airlock:ship`, `/airlock:debug` — and Claude will auto-invoke them when a request matches.
 
 ### Local development
 
 ```bash
-claude --plugin-dir /path/to/claude-devflow   # load without installing
-/reload-plugins                              # pick up edits mid-session
+claude --plugin-dir /path/to/airlock   # load without installing
+/reload-plugins                        # pick up edits mid-session
 ```
 
 ## Set up a project (do this once per repo)

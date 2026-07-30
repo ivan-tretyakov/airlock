@@ -1,33 +1,33 @@
 # Project conventions template
 
-The `devflow` skills are deliberately engine- and language-agnostic. They refer to "the project's test command", "the project's architecture invariants", and so on — **this file is where you supply those specifics.**
+The `airlock` skills are deliberately engine- and language-agnostic. They refer to "the project's test command", "the project's architecture invariants", and so on — **this file is where you supply those specifics.**
 
 Copy the block below into your project's `CLAUDE.md`, fill in the angle-bracket parts, and delete any line that doesn't apply. Every line you fill in is a line the skills stop having to guess about.
 
 ---
 
 ```markdown
-## Process: the devflow flow (non-negotiable)
+## Process: the airlock flow (non-negotiable)
 
-For any substantial change — a feature, a system, a redesign, a non-trivial bug fix — route it through the
-`devflow` plugin skills. Do **not** author specs or jump to code directly.
+One door at a time — for any substantial change (a feature, a system, a redesign, a non-trivial bug fix),
+route it through the `airlock` plugin skills. Do **not** author specs or jump to code directly.
 
-1. **`/devflow:brainstorm` FIRST** — before any spec, plan, or code. The design + scope gate: approaches →
+1. **`/airlock:brainstorm` FIRST** — before any spec, plan, or code. The design + scope gate: approaches →
    design → approval *before* work is committed. Every design doc carries a **scope contract** (deliverable +
    exact path, integration stance stated out loud, may/must-not-touch, high-level plan). **No file-writing
    subagent runs without a signed-off scope** — the test is "will a subagent write files?", not "is this
    substantial?". Small/standalone work uses the **lite lane**: just the scope contract, approved inline.
-2. **`/devflow:plan`** — approved design → a phased, TDD plan with a disjoint file contract and a per-task
+2. **`/airlock:plan`** — approved design → a phased, TDD plan with a disjoint file contract and a per-task
    model/parallel-group execution table. It **stops and asks: inline or subagents?** before implementing.
    Subagent prompts restate the file contract **verbatim** with a STOP rule; the orchestrator **audits
    `git status` against the contract** after they return.
-3. **`/devflow:ship`** — completion gate: green suite + evidence (not assertion) + commit discipline.
-4. **`/devflow:debug`** for non-trivial bugs.
+3. **`/airlock:ship`** — completion gate: green suite + evidence (not assertion) + commit discipline.
+4. **`/airlock:debug`** for non-trivial bugs.
 
 Trivial mechanical edits (a one-line swap, a config value) can be direct — but if there's a design choice
 in it, brainstorm.
 
-## Project specifics (devflow reads these)
+## Project specifics (airlock reads these)
 
 - **Test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. Must be green at every commit.
 - **Run the app:** `<e.g. npm run dev / ./run.ps1>`

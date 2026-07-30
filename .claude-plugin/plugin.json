@@ -1,12 +1,12 @@
 {
-  "name": "devflow",
-  "description": "A lightweight structured development flow: brainstorm (scope gate) → plan (subagent-ready, TDD) → ship (evidence before done), plus debug. Keeps the gates that prevent real failures without the ceremony of a heavyweight process.",
+  "name": "airlock",
+  "description": "A lightweight structured development flow: brainstorm (scope gate) → plan (subagent-ready, TDD) → ship (evidence before done), plus debug. One door at a time — nothing crosses until the chamber is sealed and cleared.",
   "version": "1.0.0",
   "author": {
     "name": "Ivan Tretyakov"
   },
-  "homepage": "https://github.com/ivan-tretyakov/claude-devflow",
-  "repository": "https://github.com/ivan-tretyakov/claude-devflow",
+  "homepage": "https://github.com/ivan-tretyakov/airlock",
+  "repository": "https://github.com/ivan-tretyakov/airlock",
   "license": "MIT",
   "keywords": [
     "workflow",
