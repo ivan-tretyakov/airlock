@@ -27,8 +27,8 @@ For a one-file tool, a script, or a contained utility, skip the approaches-and-d
 
 ## Process
 
-1. **Understand the request.** Read the relevant code and the project's `CLAUDE.md` (plus any project notes or memory) before proposing anything. State what you found.
-2. **Ask clarifying questions — batched.** Use `AskUserQuestion`, 2–4 questions max, each with a `(Recommended)` first option and your own stated position. Only ask what genuinely changes the design; decide the rest yourself and say so.
+1. **Understand the request.** Read the relevant code and project instructions (`CLAUDE.md`, `AGENTS.md`, or the host's configured equivalent), plus any project notes, before proposing anything. State what you found.
+2. **Ask clarifying questions — batched.** Use the host's structured question tool when available (`AskUserQuestion` in Claude Code, `question` in OpenCode), 2–4 questions max, each with a `(Recommended)` first option and your own stated position. Only ask what genuinely changes the design; decide the rest yourself and say so.
 3. **Float 2–3 approaches**, not one. For each: what it is, the tradeoff, and roughly how heavy. Give a clear recommendation and *why* — don't just survey.
 4. **Present the design for review** in sections: goal, scope + explicit non-goals, the **scope contract** above, key decisions with rationale, and risks. For a big or contentious call, get an **independent reviewer subagent** — ideally a different model than the one that authored the design, briefed to distrust it.
 5. **On approval**, write a short design doc to the project's specs directory (default `docs/specs/YYYY-MM-DD-<topic>-design.md`) — self-contained, since a fresh session will read only this — then hand off by invoking **`plan`**. Do not implement from the design directly.

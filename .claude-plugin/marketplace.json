@@ -1,6 +1,6 @@
 {
   "name": "airlock-marketplace",
-  "description": "Lightweight, structured development workflows for Claude Code — scope gates, subagent-ready plans, and evidence before done.",
+  "description": "Lightweight, structured development workflows for Claude Code — scope gates, subagent-ready plans, evidence before done, and a ledger that outlives the session.",
   "owner": {
     "name": "Ivan Tretyakov"
   },
@@ -8,8 +8,8 @@
     {
       "name": "airlock",
       "source": "./",
-      "description": "Lightweight structured dev flow: brainstorm → plan → ship, plus debug.",
-      "version": "1.0.0"
+      "description": "Lightweight structured dev flow: brainstorm → plan → ship → review, plus debug.",
+      "version": "1.1.0"
     }
   ]
 }

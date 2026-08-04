@@ -17,8 +17,9 @@ Guessing at fixes wastes runs and hides the real cause. Move by evidence.
 
 ## Watch for
 
-- **Confounds** before concluding — leftover local state, caches, a stale build, an unrelated config flag. An apparent logic bug is often a measurement artifact. Check the project's known confounds in `CLAUDE.md`.
+- **Confounds** before concluding — leftover local state, caches, a stale build, an unrelated config flag. An apparent logic bug is often a measurement artifact. Check the known confounds in the project's instructions.
 - **Never conclude from one run** for anything stochastic, timing-dependent, or tuning-related. Use an N-run distribution.
 - **Don't widen scope while debugging.** If the fix needs files outside the current work's contract, stop and surface it.
+- **A fix that didn't hold is a ledger item, not a footnote.** If the bug belongs to previously shipped work, hand it to `review` to create or link the item, then record the root cause and regression-test evidence there.
 
 If the root cause reveals a design problem rather than a code bug, stop and invoke **`brainstorm`**.

@@ -2,7 +2,7 @@
 
 The `airlock` skills are deliberately engine- and language-agnostic. They refer to "the project's test command", "the project's architecture invariants", and so on — **this file is where you supply those specifics.**
 
-Copy the block below into your project's `CLAUDE.md`, fill in the angle-bracket parts, and delete any line that doesn't apply. Every line you fill in is a line the skills stop having to guess about.
+Copy the block below into your project's instruction file (`CLAUDE.md` for Claude Code, `AGENTS.md` for OpenCode), fill in the angle-bracket parts, and delete any line that doesn't apply. Every line you fill in is a line the skills stop having to guess about.
 
 ---
 
@@ -12,17 +12,21 @@ Copy the block below into your project's `CLAUDE.md`, fill in the angle-bracket 
 One door at a time — for any substantial change (a feature, a system, a redesign, a non-trivial bug fix),
 route it through the `airlock` plugin skills. Do **not** author specs or jump to code directly.
 
-1. **`/airlock:brainstorm` FIRST** — before any spec, plan, or code. The design + scope gate: approaches →
+1. **Airlock `brainstorm` FIRST** (`/airlock:brainstorm` in Claude Code, `/airlock-brainstorm` in OpenCode) — before any spec, plan, or code. The design + scope gate: approaches →
    design → approval *before* work is committed. Every design doc carries a **scope contract** (deliverable +
    exact path, integration stance stated out loud, may/must-not-touch, high-level plan). **No file-writing
    subagent runs without a signed-off scope** — the test is "will a subagent write files?", not "is this
    substantial?". Small/standalone work uses the **lite lane**: just the scope contract, approved inline.
-2. **`/airlock:plan`** — approved design → a phased, TDD plan with a disjoint file contract and a per-task
+2. **Airlock `plan`** — approved design → a phased, TDD plan with a disjoint file contract and a per-task
    model/parallel-group execution table. It **stops and asks: inline or subagents?** before implementing.
    Subagent prompts restate the file contract **verbatim** with a STOP rule; the orchestrator **audits
    `git status` against the contract** after they return.
-3. **`/airlock:ship`** — completion gate: green suite + evidence (not assertion) + commit discipline.
-4. **`/airlock:debug`** for non-trivial bugs.
+3. **Airlock `ship`** — completion gate: green suite + evidence (not assertion) + commit discipline, and it
+   **records a crossing in the work's ledger** (owned vs. committed paths, evidence, deviations).
+4. **Airlock `review`** — the far door. Feedback on shipped work is **triaged before it is fixed**, resolved
+   one item at a time against a known baseline, and recorded on the ledger with a checkable commit reference.
+   State lives in the ledger, not the conversation, so a fresh session resumes cold.
+5. **Airlock `debug`** for non-trivial bugs.
 
 Trivial mechanical edits (a one-line swap, a config value) can be direct — but if there's a design choice
 in it, brainstorm.
@@ -31,7 +35,8 @@ in it, brainstorm.
 
 - **Test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. Must be green at every commit.
 - **Run the app:** `<e.g. npm run dev / ./run.ps1>`
-- **Artifact homes:** designs in `<docs/specs/>`, plans in `<docs/plans/>`
+- **Artifact homes:** designs in `<docs/specs/>`, plans in `<docs/plans/>`, ledgers in `<docs/ledger/>`
+- **Review surface:** `<e.g. local diff only / a PR per piece of work>`
 - **Architecture invariants (few, explicit, load-bearing):**
   - `<e.g. modules communicate only via the event bus or injected callables>`
   - `<e.g. entry points / composition roots are src/main.ts — treat as load-bearing>`
@@ -56,6 +61,6 @@ in it, brainstorm.
 
 ## Notes
 
-- **Keep it lean.** `CLAUDE.md` loads on every session, so bloat makes the agent *ignore* rules rather than follow them. Per line, ask: "would removing this cause a mistake?" If no, cut it.
+- **Keep it lean.** Project instructions load every session, so bloat makes the agent *ignore* rules rather than follow them. Per line, ask: "would removing this cause a mistake?" If no, cut it.
 - **The invariants list is the highest-value part.** Naming the few load-bearing files an agent must not touch measurably improves everything else it does.
-- **If a rule keeps getting ignored**, that's the signal to promote it from prose to a **hook** in `.claude/settings.json` — `CLAUDE.md` is advisory, hooks are deterministic. Good candidates: block turn-end until the suite is green; back up protected state before a run; block writes outside the active file contract.
+- **If a rule keeps getting ignored**, promote it from prose to host-native enforcement: a Claude Code hook or an OpenCode plugin/permission rule. Good candidates: block turn-end until the suite is green; back up protected state before a run; block writes outside the active file contract.
