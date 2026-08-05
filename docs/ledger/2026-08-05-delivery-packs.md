@@ -13,7 +13,7 @@
 ### Delivery Pack `AIRLOCK-P01` — Pack-aware cross-host orchestration
 
 - **Lifecycle:** accepted
-- **Review lifecycle:** awaiting-review
+- **Review lifecycle:** resolving
 - **Acceptance:** Canonical Airlock and both hosts resolve the approved pack/routing/gate workflow.
 - **Crossings:** planned 1–4, contiguous
 - **Dependencies:** none
@@ -95,10 +95,25 @@
 - **Pack lifecycle after Crossing:** accepted
 - **Deviations:** none
 
+### Crossing `AIRLOCK-P01-C05` — Triage reporting, checkpoint, and cleanup feedback — 2026-08-05
+
+- **Delivery Pack:** `AIRLOCK-P01`
+- **Commit:** this commit
+- **Candidate:** accepted source commit `71a8b4e6f60327b7beadc077e994ce9003dbbfaf`, tree `adc5e224960942b2c775293c05c684449049cb33`
+- **Owned:** ledger review state and feedback rows
+- **Touched:** ledger only
+- **Evidence:** accepted baseline `claude plugin validate . --strict` → passed; feedback triage approved by user
+- **Scope audit:** passed against ledger-only review contract
+- **Pack lifecycle after Crossing:** accepted; review lifecycle resolving
+- **Deviations:** none
+
 ## Open items
 
 | # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
 |---|---|---|---|---|---|---|---|---|
+| 1 | user prompt 2026-08-05 | SHOULD_FIX | `AIRLOCK-P01` | — | — | Standardize concise bullet-only orchestrator and subagent reports: outcome, changed paths, evidence, blockers, cleanup, actions. | open | planned repair pack |
+| 2 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | — | — | Persist a bounded local resume checkpoint during active packs so compaction and fresh sessions can resume safely. | open | planned repair pack |
+| 3 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | — | `cleanup` | Classify and clean temporary probes, screenshots, and processes while retaining deliberate evidence in its configured home. | open | planned repair pack |
 
 ## Debug records
 
