@@ -13,8 +13,8 @@ brainstorm  →  plan  →  ship  →  review
 | Skill | Fires when | What it does |
 |---|---|---|
 | **`brainstorm`** | starting a feature, system, redesign, tool — anything with a design choice | Design + **scope gate**: batched questions → 2–3 approaches with a recommendation → approval → a design doc carrying a **scope contract**. Hands off to `plan`. |
-| **`plan`** | after scope approval / at the start of an implementation session | Approved design → phased **TDD** plan with a disjoint **file contract** and a per-task **model/parallel-group execution table**. Then **asks: inline or subagents?** |
-| **`ship`** | work is finished / "commit this" | Green suite + **evidence, not assertion** + protects irreplaceable local state + commit discipline + staged diff audited against the contract, then **recorded as a ledger crossing**. |
+| **`plan`** | after scope approval / at the start of an implementation session | Approved design → independently useful **Delivery Packs**, contiguous commit Crossings, host-agent/model routing, disjoint file contracts, and planner-selected evidence gates. The user approves each pack's split, routing, and gates. |
+| **`ship`** | a planned commit boundary / final pack candidate | Seals one buildable **Crossing** with exact-candidate evidence. The final Crossing accepts its Delivery Pack only after every required unwaived gate has fresh evidence. |
 | **`review`** | feedback on shipped work, or returning after time away | The far door: **triage before repair** (MUST_FIX / SHOULD_FIX / PARK / OUT_OF_SCOPE) → approval → resolve against a known baseline → a checkable commit reference per item. |
 | **`debug`** | unclear test failure, regression, a fix that didn't hold | Reproduce deterministically → isolate → one hypothesis at a time → verify → lock in as a regression test. |
 
@@ -23,8 +23,8 @@ brainstorm  →  plan  →  ship  →  review
 Distilled from research into agentic/AI-assisted development practice. Two principles underpin everything: **the agent must be able to verify its own work**, and **context is the scarcest resource**. The practices that carry the weight:
 
 - **A design gate before code** — prevents building the wrong thing well, cheaply, before code exists.
-- **A self-contained plan naming files and ending in a verification step** — a fresh session can execute it; the file contract makes parallel sessions on one checkout safe.
-- **Green suite + evidence at every commit** — the anti-regression backbone. "Done" is a demonstration, not a claim.
+- **A self-contained plan naming files, Delivery Packs, host roles, and gates** — a fresh session can execute it; the file contract makes parallel sessions on one checkout safe.
+- **Buildable Crossings plus exact-candidate pack evidence** — the anti-regression backbone. "Done" is a demonstration against an identified candidate, not a claim.
 - **Failing test seen to fail first** — agents otherwise design tests around the code they're about to write.
 - **A durable record of what crossed** — `ship` records the evidence, committed paths, and approved deviations in a ledger that a fresh session can inspect.
 - **Feedback triaged before it is repaired** — prevents cheap comments from displacing important ones and records decisions not to make a change.
@@ -34,9 +34,9 @@ This is a deliberately lighter relative of [obra/superpowers](https://github.com
 
 ## The ledger
 
-The **design** records what was approved, the **plan** records how to implement it and which files may change, and the **ledger** records what actually crossed in each commit and what feedback remains.
+The **design** records what was approved, the **plan** records Delivery Packs, Crossings, routing, files, and gates, and the **ledger** records what actually crossed, which exact candidate each gate exercised, pack lifecycle, and what feedback remains.
 
-`ship` appends one crossing per planned commit using the final staged diff, evidence, and deviations. `review` maintains numbered feedback items. The ledger entry cannot contain the SHA of the commit containing itself, so `this commit` is resolved through the ledger's git history.
+`ship` appends one Crossing per planned commit using the final staged diff, evidence, and deviations. A pack can span several contiguous Crossings; it is accepted only on its final candidate. `review` maintains numbered feedback items linked to packs, Crossings, and gates. The ledger entry cannot contain the SHA of the commit containing itself, so `this commit` is resolved through the ledger's git history.
 
 The template ships with the completion gate at [`skills/ship/LEDGER.template.md`](skills/ship/LEDGER.template.md).
 
@@ -49,7 +49,7 @@ Nothing was disobeyed. The **approach choice was never signed off** and the **bl
 > The gate is not *"is this substantial?"* — it is *"will a subagent write files?"*
 > If yes, an approved scope contract comes first: deliverable + exact path, integration stance said out loud, extend-or-write-fresh when similar machinery exists, may/must-not-touch, and a coarse plan.
 
-…restated **verbatim in every subagent prompt** (a plan doc doesn't bind a fresh context), with a STOP-and-report rule, and a **`git status` audit against the contract** after subagents return.
+…restated **verbatim in every subagent prompt** (a plan doc doesn't bind a fresh context), with a STOP-and-report rule. The orchestrator audits the attributable changed-path delta after subagents return; `ship` separately audits the final staged diff for each Crossing.
 
 ## Claude Code
 
@@ -60,6 +60,20 @@ Nothing was disobeyed. The **approach choice was never signed off** and the **bl
 ```
 
 Then in any project, the skills are available as `/airlock:brainstorm`, `/airlock:plan`, `/airlock:ship`, `/airlock:review`, `/airlock:debug` — and Claude will auto-invoke them when a request matches.
+
+Airlock also ships Claude Code role agents. `airlock:orchestrator` defaults to Claude Opus 5 at high effort, executes the approved pack routing, and can override a specialist's default model per invocation when the plan records that mapping. To make it the main Claude agent everywhere:
+
+```json
+{
+  "agent": "airlock:orchestrator",
+  "effortLevel": "high",
+  "autoUpdatesChannel": "latest"
+}
+```
+
+The specialist defaults are Haiku for Light work and investigation/verification, Sonnet for Standard and visual work, and Opus for Complex, Critical, and independent review. Independent context is mandatory; different model family is preferred when the host supports it. Claude-native review must disclose when only same-family models are available.
+
+The `agent` setting resolves only after a release containing `airlock:orchestrator` is installed. During local development, launch with `claude --plugin-dir C:/path/to/airlock --agent airlock:orchestrator`; do not point normal sessions at an agent that exists only in unpublished source.
 
 ### Local development
 
@@ -91,14 +105,18 @@ To use Airlock elsewhere, clone it to a stable location and add its OpenCode ada
 }
 ```
 
-OpenCode can select the `airlock-*` skills automatically from their descriptions without colliding with generic names such as `plan` or `review`. Copy the `airlock-*.md` command adapters if you also want explicit slash commands. See [`adapters/opencode/README.md`](adapters/opencode/README.md) for details. Restart OpenCode after config, skill, or command changes.
+OpenCode can select the `airlock-*` skills automatically from their descriptions without colliding with generic names such as `plan` or `review`. Commands inherit the active primary agent, so use an orchestration-capable primary agent or pin host-local copies. Map Airlock work classes and roles to existing configured subagents rather than creating a duplicate `airlock-fast/balanced/deep` family. See [`adapters/opencode/README.md`](adapters/opencode/README.md) for details. Restart OpenCode after config, skill, or command changes.
+
+A source-checkout path loads the checkout's current working-tree files, including uncommitted edits. It does not fetch remote changes. Keep that checkout reviewed and update it explicitly.
 
 ## Set up a project (do this once per repo)
 
 The skills are intentionally engine-, language-, model-, and host-agnostic. Supply project specifics by copying the block from [`PROJECT-CONVENTIONS.template.md`](PROJECT-CONVENTIONS.template.md) into `CLAUDE.md` for Claude Code or `AGENTS.md` for OpenCode and filling it in:
 
-- test command, run command
+- focused tests, full tests, lint, typecheck, build, and run commands that apply
 - spec/plan/ledger artifact homes and the review surface (local diff or PR)
+- browser/MCP availability, visual specs, screenshot homes, viewports, live targets, and cleanup policy
+- host role/model mapping and independent-review policy
 - architecture invariants (the few load-bearing files an agent must not touch)
 - protected local state to back up before mutating runs
 - branch/push policy and commit conventions

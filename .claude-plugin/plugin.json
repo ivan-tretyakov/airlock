@@ -1,7 +1,7 @@
 {
   "name": "airlock",
-  "description": "A lightweight structured development flow: brainstorm (scope gate) → plan (subagent-ready, TDD) → ship (evidence before done) → review (triage before repair), plus debug. One door at a time — nothing crosses until the chamber is sealed and cleared, and what crossed is on the record.",
-  "version": "1.1.0",
+  "description": "A lightweight structured development flow: approved scope → routed Delivery Packs and buildable Crossings → exact-candidate evidence → triaged review, plus systematic debug.",
+  "version": "1.2.0",
   "author": {
     "name": "Ivan Tretyakov"
   },

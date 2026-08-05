@@ -17,12 +17,13 @@ route it through the `airlock` plugin skills. Do **not** author specs or jump to
    exact path, integration stance stated out loud, may/must-not-touch, high-level plan). **No file-writing
    subagent runs without a signed-off scope** — the test is "will a subagent write files?", not "is this
    substantial?". Small/standalone work uses the **lite lane**: just the scope contract, approved inline.
-2. **Airlock `plan`** — approved design → a phased, TDD plan with a disjoint file contract and a per-task
-   model/parallel-group execution table. It **stops and asks: inline or subagents?** before implementing.
-   Subagent prompts restate the file contract **verbatim** with a STOP rule; the orchestrator **audits
-   `git status` against the contract** after they return.
-3. **Airlock `ship`** — completion gate: green suite + evidence (not assertion) + commit discipline, and it
-   **records a crossing in the work's ledger** (owned vs. committed paths, evidence, deviations).
+2. **Airlock `plan`** — approved design → independently useful **Delivery Packs**, contiguous buildable
+   commit Crossings, disjoint file contracts, host-agent/model routing, and planner-selected evidence gates.
+   The user approves each pack's split, routing, and gates. Subagent prompts restate the file contract
+   **verbatim** with a STOP rule; the orchestrator audits the attributable changed-path delta after return.
+3. **Airlock `ship`** — seals one buildable Crossing using the final staged diff and exact-candidate evidence.
+   A pack spanning several Crossings remains active until its final candidate passes every required unwaived
+   gate. Each Crossing and pack state is recorded in the work's ledger.
 4. **Airlock `review`** — the far door. Feedback on shipped work is **triaged before it is fixed**, resolved
    one item at a time against a known baseline, and recorded on the ledger with a checkable commit reference.
    State lives in the ledger, not the conversation, so a fresh session resumes cold.
@@ -33,7 +34,9 @@ in it, brainstorm.
 
 ## Project specifics (airlock reads these)
 
-- **Test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. Must be green at every commit.
+- **Focused test command:** `<e.g. npm test -- path / pytest tests/x.py>`
+- **Full test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. State whether every Crossing requires it.
+- **Typecheck / lint / build:** `<exact commands, or not applicable>`
 - **Run the app:** `<e.g. npm run dev / ./run.ps1>`
 - **Artifact homes:** designs in `<docs/specs/>`, plans in `<docs/plans/>`, ledgers in `<docs/ledger/>`
 - **Review surface:** `<e.g. local diff only / a PR per piece of work>`
@@ -44,7 +47,13 @@ in it, brainstorm.
 - **Protected local state — back up before any run that mutates it, restore after:**
   - `<e.g. %APPDATA%/MyApp/save.cfg — the user's real progress>`
 - **Validation constraints:** `<e.g. subagent-launched background processes die when the turn ends — all
-  validation must be bounded FOREGROUND runs inside the turn>`
+   validation must be bounded FOREGROUND runs inside the turn>`
+- **Browser and visual verification:** `<MCP/browser availability, startup URL, cited visual spec, screenshot
+  home, required desktop/mobile viewports, and whether authenticated state can be shared with subagents>`
+- **Live integration and cleanup:** `<approved throwaway target, allowed mutations, rollback/cleanup, and
+  evidence that cleanup succeeded>`
+- **Host routing:** `<map Light/Standard/Complex/Critical + investigator/verifier/reviewer/visual roles to
+  configured agents and models; state the independent-review policy and accepted downgrade>`
 - **Stochastic/tuning verification:** `<e.g. never judge balance from one run — use N-seed distributions via
   the harness at tools/harness>`
 - **Generated-asset provenance:** `<e.g. all AI images go through tools/gen_art.py; each appends a row to
