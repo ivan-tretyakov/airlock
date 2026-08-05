@@ -1,80 +1,117 @@
 ---
 name: plan
-description: Turns an approved design into a phased, test-first implementation plan with a disjoint file contract and a per-task subagent/model execution table, then asks whether to run it inline or via subagents and drives the implementation under TDD. Use after design/scope approval and before writing production code, or when starting an implementation session for an approved piece of work. Requires an approved scope — if there isn't one, invoke brainstorm first.
+description: Turns an approved design into a test-first Delivery Pack plan with contiguous scope-audited Crossings, disjoint file contracts, portable work classes and host roles, host-routing mappings, and planner-selected gates. Gets per-pack routing and gate approval before implementation. Requires approved scope; otherwise invoke brainstorm.
 ---
 
-# Plan — approved design → verifiable implementation
+# Plan — approved design → verifiable Delivery Packs
 
-Precondition: an approved design or scope contract exists (usually in the project's specs directory). If not, stop and invoke **`brainstorm`**.
+Precondition: an approved design or scope contract exists. If not, stop and invoke **`brainstorm`**.
 
-## Write the plan file
+## Core units and lifecycle
 
-Write the plan to the project's plans directory (default `docs/plans/YYYY-MM-DD-<topic>.md`). It must be self-contained — a fresh session with no prior context implements from it alone. Include:
+- A **Crossing** is one scope-audited, buildable commit with focused evidence.
+- A **Delivery Pack** is one coherent outcome delivered by one or more contiguous Crossings. Finish its Crossing sequence before committing a Crossing from another pack.
+- A multi-Crossing Delivery Pack records why one Crossing is insufficient, dependencies, and a pack-level rollback strategy. Dependent Crossings are not promised to remain independently revertible.
+- Pack lifecycle is `planned → active → candidate → accepted`. `blocked`, `abandoned`, and `reverted` are exceptional terminal outcomes. Post-ship review lifecycle is orthogonal and never substitutes for pack lifecycle.
 
-- **Goal** — one paragraph. What "done" looks like.
-- **Architecture** — how it fits the architecture invariants in the project's instructions. Name the ones this work touches.
-- **File contract (required — this is what makes parallel sessions on one checkout safe):**
-  - **Owns** — the exact files/globs this session may create or modify.
-  - **Process artifacts** — the exact plan and ledger paths. These are owned by the orchestrator at every phase and must not be assigned to parallel subagents.
-  - **Must NOT touch** — load-bearing files and files owned by other lanes.
-  - **STOP-and-handoff** — if the work needs a must-not-touch file, stop and surface it rather than edit it.
-- **Phased tasks**, each 2–15 min, in checkbox (`- [ ]`) form, each with:
-  1. Write the failing test first. Run it, **see it fail (RED)** — state the expected failure.
-  2. Implement the minimum to pass. Run it, **see it pass (GREEN)**.
-  3. Refactor if needed; suite stays green.
-  4. Before its planned commit, tick the checkbox in this file. Progress must live on disk, not only in the conversation.
-- **Commit boundaries** — group related tasks into named commits. Invoke `ship` at every commit boundary so every commit gets the same evidence gate and one ledger crossing.
-- **Review checkpoints** — mark phase boundaries where the user should inspect the diff before it is committed. Checkpoint feedback is part of execution; feedback on an already shipped commit goes through `review`.
-- **Bounded-foreground validation** — any long-running validation (integration runs, harnesses, screenshots) is a bounded foreground run inside the turn. Subagent-launched background processes die when the agent's turn ends.
-- **End-to-end verification step** — the concrete check that proves the whole thing works, not just the units.
-- **Execution table (required — always plan for subagents, even if the user later picks inline).**
+## Write the self-contained plan
 
-## Always plan for subagents
+Write to the project’s plans directory (default `docs/plans/YYYY-MM-DD-<topic>.md`). A fresh session must be able to execute it alone. Include:
 
-Every plan is written so it *could* be handed to subagents. For each task, decide and record: who runs it, on which model, and what can run at the same time.
+1. **Goal and architecture** — what done means and which project invariants are involved.
+2. **File contract:**
+   - **Owns** — exact files/globs this work may create or modify.
+   - **Process artifacts** — exact design, plan, and ledger paths, owned only by the orchestrator.
+   - **Candidate-bearing paths** — substantive code, tests, configuration, generated artifacts, and cited specs whose changes stale affected final evidence. Exclude only ledger bookkeeping and purely administrative plan progress.
+   - **Must NOT touch** — load-bearing paths and other lanes’ files.
+   - **STOP-and-handoff** — surface a needed unowned path; never edit it without approval.
+3. **Delivery Pack table:**
 
-| Task | Runner | Tier | Selected model | Why | Parallel group | Checkpoint | Owns (files) |
+| Pack ID | Outcome / acceptance | Crossing range | Lifecycle | Dependencies | Multi-Crossing reason | Rollback strategy | Pack/routing/gates approval |
 |---|---|---|---|---|---|---|---|
-| 1. … | subagent | Fast | `<host/model>` | mechanical | A | no | `tests/test_x` |
-| 2. … | subagent | Balanced | `<host/model>` | contained TDD | A | yes | `src/x` |
-| 3. … | inline | Deep | `<host/model>` | architecture | B (after A) | yes | `src/main` |
+| `<pack-id>` | `<coherent result>` | `<first>…<last>, contiguous` | planned | `<packs/external>` | `<required if >1; otherwise “single Crossing”>` | `<pack-level>` | proposed |
 
-**Model tiering** — pick a capability tier per task, map it to an available host model, and say *why* in one clause:
-- **Fast** — mechanical, fully specified, low judgment: boilerplate, data/content authoring, renames, repetitive scaffolding.
-- **Balanced** — the default for standard implementation: a clear test, a clear contract, contained blast radius. Most TDD tasks.
-- **Deep** — architecture and interface design, cross-cutting changes, tuning/judgment calls, gnarly debugging, anything where a wrong call is expensive to unwind.
+4. **Crossing/task mapping.** Give every task a checkbox and every Crossing a buildable result:
 
-**Rules that make subagent execution safe:**
-- Tasks in the same parallel group **must have disjoint `Owns` sets** — parallel sessions share one working tree. If two tasks want the same file, they are not the same group.
-- Each subagent task must be **self-contained**: it gets a fresh context and cannot see this conversation. Restate the goal, its slice of the file contract, the RED→GREEN steps, and the STOP-and-handoff rule in the task prompt.
-- Subagents run **bounded foreground** validation only, and report **evidence** (test output), never just a claim.
-- Serialize anything touching a shared file, an entry point / composition root, or project-wide config.
+| Crossing ID | Pack ID | Tasks | Buildable result | Depends on | Owns |
+|---|---|---|---|---|---|
+| `<crossing-id>` | `<pack-id>` | `1–3` | `<working state at this commit>` | `<crossing IDs>` | `<exact paths>` |
 
-## Decide where the user sees the work
+Keep checkbox tasks small (typically 2–15 minutes). For behavior changes, follow RED → GREEN → refactor: write the failing test, run it and state the expected failure, implement the minimum, then rerun it. Tick tasks before their Crossing ships; progress lives on disk. A Crossing must not intentionally leave the build broken.
 
-A plan that presents everything only after the last phase is expensive to correct. Mark checkpoints in the execution table with a `Checkpoint` column. Stop, show the diff and evidence since the previous checkpoint, and wait before committing or continuing.
+5. **Checkpoints and end-to-end proof.** Mark user diff checkpoints when a parallel group closes, an architecture invariant is touched, or later work depends on a judgment call. Keep long-running validation bounded and foreground. State the final proof of the outcome, not only unit checks.
 
-Default to a checkpoint when a parallel group closes, an architecture invariant is touched, or a later phase depends on an earlier judgment call. Cheap mechanical phases do not need one.
+## Portable execution and host routing
 
-## Dispatch protocol — before, during, after
+Record the route per pack/task; do not make one global “all inline” or “all subagents” choice.
 
-**Before dispatching any file-writing subagent**, there must be an approved scope contract (from `brainstorm`, full or lite lane). No signed-off scope → no coding subagent. If one doesn't exist, stop and get one.
+| Pack / Crossing / task | Work class | Host role | Mode | Why | Parallel group | Checkpoint | Owns |
+|---|---|---|---|---|---|---|---|
+| `<IDs>` | Standard | implementer | inline/subagent | `<one clause>` | A | yes/no | `<exact paths>` |
 
-**In every subagent prompt, restate the contract verbatim** — a contract that lives only in a plan doc does not bind a fresh context. Include:
+Portable work classes describe risk and judgment, not a vendor model:
+
+- **Light** — mechanical or tightly contained, low-risk work with an obvious check.
+- **Standard** — normal contained implementation with clear contracts and tests.
+- **Complex** — cross-cutting behavior, architecture, or difficult diagnosis.
+- **Critical** — safety-sensitive, irreversible, public-contract, or expensive-to-unwind work.
+
+Use portable host roles such as `orchestrator`, `implementer`, `investigator`, `verifier`, `independent-reviewer`, `browser-verifier`, and `visual-verifier`. Then map the roles to what the active host actually offers:
+
+| Host role / work class | Selected host agent or runtime | Selected available model | Independence / rationale |
+|---|---|---|---|
+| `<role> / <class>` | `<configured agent, subagent, or inline>` | `<host-selected model>` | `<why; note any independence limitation>` |
+
+Do not bake host-specific model IDs into the canonical workflow. The plan records the selected mapping; gate evidence records the effective agent and model that actually ran.
+
+Parallel tasks must have disjoint `Owns` sets. Serialize shared files, entry points, and project-wide configuration.
+
+## Select gates with discretion
+
+The planner chooses gates from the outcome’s risks; Airlock does not demand every gate. Explicitly decide pre-ship independent code review, browser-functional, visual-fidelity, live-integration, and external-state cleanup whenever each is plausibly relevant. Do not add a row for every imaginable `not-required` gate.
+
+Give detailed rows only to required gates:
+
+| Gate ID | Pack ID | Gate | Applicability | Initial gate state | Executor host role | Command / MCP tool | Environment / target | Pass condition / artifact |
+|---|---|---|---|---|---|---|---|---|
+| `<gate-id>` | `<pack-id>` | `<technical/review/browser/...>` | required | pending | verifier | `<exact invocation>` | `<where/what>` | `<observable result>` |
+
+For a plausibly relevant gate that is omitted, record one compact decision:
+
+| Pack ID | Considered gate | Applicability | Reason |
+|---|---|---|---|
+| `<pack-id>` | `<gate>` | not-required | `<risk-based reason>` |
+
+Applicability (`required` or `not-required`), runtime gate state (`pending`, `running`, `passed`, `failed`, `blocked`, `stale`), and an approved waiver are separate facts. A waiver needs approver, reason, and date; it never changes applicability or fabricates a `passed` state.
+
+Implementers run focused RED/GREEN and Crossing checks. After code freeze, an independent verifier context or specialized gate role runs the required final pack gates against one exact candidate without editing source during gate execution. A pre-ship independent-review gate is part of acceptance; post-ship feedback belongs to Airlock **`review`**.
+
+Each final gate will record either a full commit/tree or `base SHA + staged product-diff hash`, plus timestamp, effective agent/model, command or MCP tool, environment, result, and artifact. Substantive changes to candidate-bearing paths make affected evidence `stale`.
+
+## Per-pack approval before execution
+
+When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use the host’s structured question tool when available and give a recommendation. One pack may mix inline and subagent tasks. Do not ask for a global inline/subagent choice, and do not execute a pack until its row, routing, and gates are approved.
+
+A Light, single-Crossing pack may use one compact route row and only its genuinely required gates. Explicit risk decisions still apply, but ceremony should not outweigh the work.
+
+## Dispatch protocol
+
+Before any file-writing subagent, confirm the approved scope. Restate this contract **verbatim** in every fresh-context prompt:
 
 > **You may create or modify ONLY:** `<exact paths>`
-> **You must NOT touch:** `<exclusions — runtime code, entry points, other lanes>`
-> **Integration stance:** `<standalone — do not wire into the application or modify existing generators / integrated with X>`
-> **STOP rule:** if this task appears to require any file outside the list above — including existing runtime code, or extending an existing generator — **STOP and report back. Do not edit it.** A blocked task reported honestly is a success; a widened one is not.
+>
+> **You must NOT touch:** `<load-bearing exclusions and other lanes>`
+>
+> **Integration stance:** `<standalone or integrated with named seam>`
+>
+> **STOP rule:** if the task appears to require any path outside the allowlist, **STOP and report back. Do not edit it.** A blocked task reported honestly is a success; widened scope is not.
 
-**After the subagents return, audit the diff before accepting the work.** Run `git status --short` and compare every changed path against the contract. Anything outside it: surface it to the user (and revert it unless they want it). Do this even when the subagent reports success — the audit is what catches an ignored instruction.
+Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, and evidence expected. After return, audit `git status --short` against the contract before accepting the work; surface out-of-contract paths instead of silently keeping or reverting them.
 
-## Ask before executing
+## Implement
 
-When the plan file is written, **stop and ask the user how to run it** — always, every time. Use the host's structured question tool (`AskUserQuestion` in Claude Code, `question` in OpenCode): **inline in this session** vs **dispatch to subagents**, with your own recommendation and the reason (typically: subagents when there are disjoint parallel groups or cheap mechanical tasks to farm out; inline when the work is one tight serial thread or needs continuous judgment). Include the proposed capability tiers and selected models in the option description. Do not start implementing until they answer.
+Activate one approved Delivery Pack and work its contiguous Crossings in order. Tasks may run in parallel only under disjoint ownership. Keep required per-Crossing checks green, turn diagnosed bugs into regression tests, and stop at planned checkpoints.
 
-## Then implement
+Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery Pack only when all unwaived required gates have fresh evidence for its exact candidate. Feedback after a shipped commit goes through **`review`**.
 
-Work the tasks top to bottom under TDD, inline or via subagents per the user's answer. Keep the test suite green at every commit using the test command from the project's instructions. Write the test and see it fail before writing the code it tests — do not design tests around code you're about to write. Turn every diagnosed bug into a regression test.
-
-Invoke **`ship`** at each planned commit boundary. When all crossings are recorded and the work is complete, feedback on shipped commits goes through **`review`**.
+If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence.

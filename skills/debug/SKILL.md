@@ -1,25 +1,42 @@
 ---
 name: debug
-description: Systematic debugging for non-trivial bugs — reproduce, isolate, hypothesize, fix, and lock in with a regression test, instead of guessing. Use when a test fails for an unclear reason, behavior is wrong, something regressed, or a fix didn't hold. Skip for obvious one-line typos.
+description: Pack-aware systematic debugging for unclear failures and regressions. Reproduces, isolates, tests one hypothesis, records the failed Delivery Pack/gate and affected gates to rerun, then locks in a regression test. Routes fixes to active Crossings or linked repair packs without widening scope. Skip obvious one-line typos.
 ---
 
 # Debug — reproduce before you fix
 
-Guessing at fixes wastes runs and hides the real cause. Move by evidence.
+Guessing wastes runs and can hide stale gate evidence. Move by evidence.
 
-## Loop
+## Establish pack and gate context
 
-1. **Reproduce deterministically.** Write a failing test (or a fixed-seed run) that shows the bug. If you can't reproduce it, you can't confirm a fix — get reproduction first. Same inputs + same seed = identical results; rely on that.
-2. **Isolate.** Narrow to the smallest input/state that triggers it. **Read the actual runtime output** — run the thing and look at the real error rather than reasoning about the source as text.
-3. **Hypothesize, one at a time.** State the suspected cause and the single change that should fix it, and *why*. Change one thing.
-4. **Verify.** Rerun the failing case → it passes; rerun the full suite → still green. If it didn't fix it, revert and form a new hypothesis — don't stack speculative changes.
-5. **Lock it in.** Keep the reproduction as a regression test so the same failure can't return after a refactor, dependency bump, or model change.
+When the failure belongs to planned or shipped work, load its plan and ledger before changing files. Record a Debug row when the ledger is an owned process artifact; otherwise carry the proposed row into `review`/the repair pack instead of widening scope. Include:
 
-## Watch for
+- Delivery Pack ID and exact candidate/Crossing;
+- failed gate ID, or the named observed check if no planned gate covered it;
+- deterministic reproduction and, when known, root cause;
+- affected gate IDs that must rerun after a fix; and
+- current state and linked repair pack.
 
-- **Confounds** before concluding — leftover local state, caches, a stale build, an unrelated config flag. An apparent logic bug is often a measurement artifact. Check the known confounds in the project's instructions.
-- **Never conclude from one run** for anything stochastic, timing-dependent, or tuning-related. Use an N-run distribution.
-- **Don't widen scope while debugging.** If the fix needs files outside the current work's contract, stop and surface it.
-- **A fix that didn't hold is a ledger item, not a footnote.** If the bug belongs to previously shipped work, hand it to `review` to create or link the item, then record the root cause and regression-test evidence there.
+Do not invent a gate association. If the pack/gate is ambiguous, stop and ask. An observed planned-gate failure sets that gate state to `failed`; a capability/environment failure may be `blocked`. Only substantive candidate changes make previously passed affected evidence `stale`.
 
-If the root cause reveals a design problem rather than a code bug, stop and invoke **`brainstorm`**.
+For a legacy 1.1 ledger, treat all historical Crossings as one implicit `legacy:<work-id>` Delivery Pack. Preserve old evidence as unstructured and old `Status` as legacy review metadata. Historical lifecycle, gate state/applicability, waivers, and exact candidate remain `unknown`; never infer that a 1.2 gate passed.
+
+## Evidence loop
+
+1. **Reproduce deterministically.** Write a failing test or fixed-seed run. If it cannot be reproduced, gather the missing reproduction instead of claiming a fix.
+2. **Isolate.** Minimize input/state and read actual runtime output. Check project-listed confounds such as stale state, caches, builds, environment, and unrelated flags.
+3. **Hypothesize one cause.** State the cause, one change that should test it, and why. Do not stack speculative edits.
+4. **Verify the hypothesis.** Rerun the failing case. If it remains red, revert the speculative change and form a new hypothesis.
+5. **Lock it in.** Keep the smallest reproduction as a regression test, then run the required broader Crossing checks.
+
+For stochastic, timing-sensitive, or tuning behavior, use the planned N-run/fixed-seed distribution, never one run.
+
+## Route and reverify
+
+- **Active/candidate pack:** fix in the planned Crossing only if its approved file contract and outcome cover the change. Otherwise stop for a scope/plan amendment.
+- **Accepted or legacy pack:** hand the finding to **`review`** for triage and a linked repair Delivery Pack before production edits. A small fix can use a Light, single-Crossing repair pack.
+- **Design flaw:** stop and invoke **`brainstorm`**.
+
+After a substantive fix, update the Debug row’s **Gates to rerun** list and mark affected passed gates `stale`. The implementer reruns the focused reproduction; after code freeze, the planned verifier reruns only missing/stale required gates against the repair/current pack’s exact candidate. `debug` does not turn old evidence into a pass.
+
+Do not widen scope. If any required path is outside the approved contract, stop and surface it. Invoke **`ship`** for the resulting Crossing; it owns final gate freshness and pack acceptance.

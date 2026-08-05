@@ -1,40 +1,51 @@
 ---
 name: brainstorm
-description: Design-review and scope gate before any substantial work. Explores intent, approaches, and design, and locks a scope contract (deliverable path, integration stance, may/must-not-touch, high-level plan) with the user's approval BEFORE a spec, plan, or code is written. Use before starting a feature, system, redesign, tool or script, or any non-trivial change — and always before dispatching a subagent that will write files. Skip only for trivial mechanical edits (a one-line swap, a config value, a launcher tweak).
+description: Design-review and scope gate before substantial work. Locks an approved scope contract, candidate Delivery Packs, and verification intent before a spec, plan, production code, or file-writing subagent. Use for a feature, system, redesign, tool, or non-trivial change; skip only genuinely mechanical edits.
 ---
 
 # Brainstorm — the design and scope gate
 
-The one job of this skill: make the design decision *before* work is committed, so the agent doesn't build the wrong thing well. Writing a spec or jumping to code without this step is the specific mistake to avoid.
+Make the design decision *before* work is committed, so the agent does not build the wrong thing well.
 
 ## Hard-ish gate
 
-Do **not** write a plan or production code until you have presented a design and the user has approved it. Exploratory reading, sketching options, and throwaway spikes are fine; committing to an approach is not, until approved.
+Do **not** write a plan or production code until you have presented a design and the user has approved it. Exploratory reading, options, and throwaway spikes are fine; committing to an approach is not.
 
-**No coding subagent runs without a signed-off scope.** The test is not "is this substantial?" — it is *"will a subagent write files?"* If yes, it needs an approved **scope contract** first, even if that's six lines (see the lite lane below). A subagent gets a fresh context and will happily pick a defensible-but-wrong approach; the scope contract is what makes the blast radius the user's decision instead of the agent's.
+**No file-writing subagent runs without a signed-off scope.** The test is not “is this substantial?” but *“will a subagent write files?”* A fresh context can choose a defensible-but-wrong blast radius; the scope contract makes that choice explicit.
 
-## Scope contract (required — in every design doc and scope note)
+## Scope contract — required in every design or scope note
 
-- **Deliverable + exact path** — the file(s) that exist when this is done, e.g. `tools/report.html`, one self-contained file.
-- **Integration stance — say it out loud.** *Standalone* ("does NOT wire into the application, does NOT modify existing generators or runtime code") or *integrated* (name exactly what it hooks into). Never leave this implied.
-- **If something similar already exists, state extend-or-write-fresh.** When a comparable artifact is already produced by other machinery, decide explicitly whether to extend that machinery or author a new file beside it. This is the classic miss: asked for a standalone HTML page, an agent will extend the existing program that emits the current HTML — reasonable in isolation, wrong against intent.
-- **May touch / MUST NOT touch** — paths, as globs. Name the load-bearing exclusions (runtime code, composition roots / entry points, other lanes' files).
-- **High-level plan** — 3–7 coarse steps, each with a model tier. Approving the spec then approves the *shape and cost* of the work, not just the idea.
+- **Deliverable + exact path** — the files that exist when done.
+- **Integration stance — say it out loud.** *Standalone* (“does not wire into the application or modify existing generators/runtime code”) or *integrated* (name the seam).
+- **Extend or write fresh.** If similar machinery exists, explicitly choose whether to extend it or create a separate artifact.
+- **May touch / MUST NOT touch** — exact paths or globs, including load-bearing exclusions and other lanes’ files.
+- **High-level shape** — 3–7 coarse steps and likely cost/complexity. Detailed routing belongs in `plan`.
 
-## Lite lane — small or standalone work
+## Candidate Delivery Packs and verification intent
 
-For a one-file tool, a script, or a contained utility, skip the approaches-and-design ceremony: present just the **scope contract** above as a short scope note, get a yes, and go straight to **`plan`** (or implement directly if it is genuinely trivial). The gate has to stay cheap enough that it never gets bypassed — a bypassed gate is how the wrong thing gets built.
+Sketch the outcome boundaries before handing off:
+
+- A **Crossing** is one scope-audited, buildable commit with focused evidence.
+- A **Delivery Pack** is one coherent outcome spanning one or more **contiguous** Crossings.
+- For a multi-Crossing Delivery Pack, state why one Crossing is insufficient, its dependencies, and its pack-level rollback strategy. Do not promise that dependent Crossings remain independently revertible.
+- Note likely pack dependencies and acceptance outcomes. `plan` assigns stable IDs, exact Crossing/task mapping, work classes, host roles, and routing.
+
+Also state verification intent: what would demonstrate the outcome and which risks may require technical checks, pre-ship independent code review, browser-functional, visual-fidelity, live-integration, or external-state cleanup gates. Mention only plausible gates; `plan` decides applicability and records required rows. A pre-ship independent-review gate is not the post-ship Airlock `review` workflow.
+
+The eventual Delivery Pack lifecycle is `planned → active → candidate → accepted`, with `blocked`, `abandoned`, and `reverted` as exceptional terminal outcomes. Its review lifecycle is separate.
+
+## Lite lane
+
+For a one-file tool, script, or contained utility, present a short scope contract plus one likely Light, single-Crossing Delivery Pack and verification intent. Get approval, then go to **`plan`** (or implement directly only if genuinely trivial). Keep the gate cheap enough to use.
 
 ## Process
 
-1. **Understand the request.** Read the relevant code and project instructions (`CLAUDE.md`, `AGENTS.md`, or the host's configured equivalent), plus any project notes, before proposing anything. State what you found.
-2. **Ask clarifying questions — batched.** Use the host's structured question tool when available (`AskUserQuestion` in Claude Code, `question` in OpenCode), 2–4 questions max, each with a `(Recommended)` first option and your own stated position. Only ask what genuinely changes the design; decide the rest yourself and say so.
-3. **Float 2–3 approaches**, not one. For each: what it is, the tradeoff, and roughly how heavy. Give a clear recommendation and *why* — don't just survey.
-4. **Present the design for review** in sections: goal, scope + explicit non-goals, the **scope contract** above, key decisions with rationale, and risks. For a big or contentious call, get an **independent reviewer subagent** — ideally a different model than the one that authored the design, briefed to distrust it.
-5. **On approval**, write a short design doc to the project's specs directory (default `docs/specs/YYYY-MM-DD-<topic>-design.md`) — self-contained, since a fresh session will read only this — then hand off by invoking **`plan`**. Do not implement from the design directly.
+1. **Understand the request.** Read relevant code, project instructions (`CLAUDE.md`, `AGENTS.md`, or configured equivalent), and project notes. State what you found.
+2. **Ask only design-changing questions, batched.** Use the host’s structured question tool when available, 2–4 questions max, with a recommended option and your position.
+3. **Float 2–3 approaches.** Give each tradeoff and rough weight, then recommend one and explain why.
+4. **Present the design:** goal, scope/non-goals, scope contract, key decisions, candidate Delivery Packs, verification intent, and risks. For a contentious or expensive decision, seek an independent reviewer in a separate context, preferably from a different model family when available.
+5. **On approval**, write the self-contained design to the project’s specs directory (default `docs/specs/YYYY-MM-DD-<topic>-design.md`) and invoke **`plan`**. Do not implement directly from the design.
 
-## Keep it coherent
-
-Capture the *why* behind each decision, not just the decision — this is what keeps the design coherent when an agent writes the code later. Specify *what* and the constraints; leave *how* to the implementation. Watch for convention drift ("similar products do X") pulling the design off its intent.
+Capture the *why*, not only the decision. Specify outcomes and constraints; leave implementation detail and final pack routing/gates to `plan`.
 
 Next skill: **`plan`**.

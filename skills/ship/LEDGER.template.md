@@ -1,26 +1,61 @@
 # Ledger template
 
-The ledger records what was agreed, what each commit actually changed, and what feedback remains. One ledger belongs to one piece of work and is named to match its plan, normally `docs/ledger/YYYY-MM-DD-<topic>.md`.
+The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-candidate gate evidence, and post-ship feedback. One ledger normally matches one plan at `docs/ledger/YYYY-MM-DD-<topic>.md`.
 
 ```markdown
 # Ledger — <topic>
 
+- **Schema:** Airlock 1.2
 - **Work ID:** `<stable topic or issue ID>`
 - **Design:** `docs/specs/YYYY-MM-DD-<topic>-design.md`
 - **Plan:** `docs/plans/YYYY-MM-DD-<topic>.md`
-- **Base SHA:** `<full sha before the work began>`
+- **Base SHA:** `<full SHA before the work began>`
 - **Branch:** `<branch>`
 - **PR:** `<number or none>`
-- **Status:** in-progress | awaiting-review | resolving | cleared
+
+## Delivery Packs
+
+### Delivery Pack `<pack-id>` — `<coherent outcome>`
+
+- **Lifecycle:** planned | active | candidate | accepted | blocked | abandoned | reverted
+- **Review lifecycle:** in-progress | awaiting-review | resolving | cleared
+- **Acceptance:** `<observable outcome>`
+- **Crossings:** `<one contiguous Crossing range>`
+- **Dependencies:** `<pack IDs or external dependencies; none if none>`
+- **Multi-Crossing reason:** `<why one commit is insufficient; “single Crossing” if one>`
+- **Rollback strategy:** `<pack-level order/strategy; no promise that dependent Crossings are independently revertible>`
+- **Repairs:** `<accepted pack ID this repairs, or repair pack IDs, or none>`
+- **Current candidate:** `<exact candidate or none>`
+- **Accepted candidate:** `<exact candidate or none>`
+
+## Gate register
+
+<!-- Applicability: required | not-required -->
+<!-- Gate state for required gates: pending | running | passed | failed | blocked | stale -->
+<!-- A waiver is separate from applicability and gate state. -->
+
+| Gate ID | Pack ID | Gate | Applicability | Gate state | Waiver approver | Waiver reason | Waiver date | Current evidence |
+|---|---|---|---|---|---|---|---|---|
+| `<gate-id>` | `<pack-id>` | `<technical/review/browser/visual/live/cleanup>` | required | pending | — | — | — | — |
+
+## Gate evidence
+
+| Evidence ID | Gate ID | Exact candidate | Timestamp | Executor role | Effective agent | Effective model | Command / MCP tool | Environment / target | Result | Artifact reference |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `<evidence-id>` | `<gate-id>` | `<commit + tree, or base SHA + staged product-diff hash>` | `<ISO-8601>` | verifier | `<actual>` | `<actual>` | `<exact invocation>` | `<where/what>` | passed/failed/blocked | `<path/URL/log reference>` |
 
 ## Crossings
 
-### Crossing `<work-id>-<sequence>` — Phase <n>: <name> — <YYYY-MM-DD>
+### Crossing `<crossing-id>` — `<name>` — `<YYYY-MM-DD>`
 
-- **Commit:** this commit (locate with `git log -S '<work-id>-<sequence>' --oneline -- <this-ledger-path>`)
-- **Owned:** `<paths from the plan's file contract>`
+- **Delivery Pack:** `<pack-id>`
+- **Commit:** this commit (locate with `git log -S '<crossing-id>' --oneline -- <this-ledger-path>`)
+- **Candidate:** `<commit/tree or base SHA + staged product-diff hash>`
+- **Owned:** `<paths from this Crossing’s file contract>`
 - **Touched:** `<paths from the final staged diff>`
-- **Evidence:** `<test command>` → `<pass/fail summary>`
+- **Evidence:** `<focused and required Crossing checks>` → `<result>`
+- **Scope audit:** passed against `<plan Crossing/file contract>`
+- **Pack lifecycle after Crossing:** active | accepted
 - **Deviations:** none
 
 ## Open items
@@ -28,16 +63,27 @@ The ledger records what was agreed, what each commit actually changed, and what 
 <!-- Class: MUST_FIX | SHOULD_FIX | PARK | OUT_OF_SCOPE -->
 <!-- State: open | done | parked | rejected -->
 
-| # | Source ID / URL | Class | Item | State | Resolution |
-|---|---|---|---|---|---|
-| 1 | <prompt, check, issue, or thread URL> | MUST_FIX | <one line> | open | |
+| # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `<prompt, check, issue, or thread URL>` | MUST_FIX | `<pack-id>` | `<crossing-id or —>` | `<gate-id or —>` | `<one line>` | open | |
+
+## Debug records
+
+| Debug ID | Pack ID | Candidate / Crossing | Failed gate or check | Reproduction / root cause | Gates to rerun | State / repair pack |
+|---|---|---|---|---|---|---|
+| `<debug-id>` | `<pack-id>` | `<exact reference>` | `<gate-id or named observed check>` | `<deterministic evidence; root cause when known>` | `<affected gate IDs>` | investigating |
 ```
 
 Rules:
 
-- `Touched` comes from the staged diff, not the whole worktree.
-- Every crossing ID is unique within the ledger, making its containing commit resolvable with `git log -S`.
-- A completed item needs a checkable commit reference. When its row is updated with the fix, `this commit` means the commit shown by `git blame` for that row.
-- `PARK` ends as `parked` with a backlog or issue reference. `OUT_OF_SCOPE` ends as `rejected` with the scope reason.
-- Reconstructed history must label unavailable evidence, approvals, and deviations as `unknown`; never infer them from a green suite today.
-- Keep entries terse and commit ledger changes with the work they describe.
+- A Crossing is one scope-audited, buildable commit. A Delivery Pack is one coherent outcome spanning one or more contiguous Crossings.
+- Pack lifecycle is `planned → active → candidate → accepted`; `blocked`, `abandoned`, and `reverted` are exceptional terminal outcomes. Review lifecycle is orthogonal.
+- `Touched` comes from the staged diff, not the whole worktree. Every Crossing ID is unique, so `git log -S` resolves its containing commit.
+- Detailed evidence identifies the exact candidate, timestamp, effective agent/model, tool, environment, result, and artifact. Substantive code, test, configuration, generated-artifact, or cited-spec changes set affected passed gates to `stale`; bookkeeping-only ledger edits do not.
+- Carry required gates and only plausibly relevant `not-required` decisions from the plan into the register. A `not-required` gate has `—` for gate state and evidence; it is not a pass or waiver.
+- Accept a pack only when every unwaived required gate has fresh `passed` evidence for its exact candidate. A waiver records approver/reason/date but neither changes applicability nor fabricates a pass.
+- A completed feedback item needs a checkable commit reference. `this commit` in an updated row means the commit shown by `git blame` for that row. Post-acceptance product changes use a linked repair Delivery Pack; do not rewrite historical acceptance.
+- `PARK` ends `parked` with a backlog reference. `OUT_OF_SCOPE` ends `rejected` with the scope reason.
+- Reconstructed entries include the reconstruction date and mark unproven evidence, approvals, and deviations `unknown`; never present them as contemporaneous records.
+- **Legacy 1.1:** a ledger with Crossings but no Delivery Pack section is one implicit pack, `legacy:<work-id>`. Preserve old Evidence text as unstructured and old `Status` as legacy review metadata, not pack lifecycle. Historical lifecycle, gate applicability/state, waiver, exact-candidate evidence, and approvals are `unknown`; never invent 1.2 gate evidence from a current run.
+- Keep entries terse and commit ledger changes with the Crossing they describe.
