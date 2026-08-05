@@ -53,6 +53,18 @@
 - **Pack lifecycle after Crossing:** active
 - **Deviations:** none
 
+### Crossing `AIRLOCK-P01-C02` — Claude Code role agents — 2026-08-05
+
+- **Delivery Pack:** `AIRLOCK-P01`
+- **Commit:** this commit
+- **Candidate:** base `3ee12ca` + staged product-diff hash `5aa6f4cb1f23d029389e218db3418243958b5832` (`git hash-object --stdin`)
+- **Owned:** `agents/orchestrator.md`, `agents/code-{light,standard,complex,critical}.md`, `agents/{investigate,verify,visual-review,review}.md`, ledger process artifact
+- **Touched:** nine Claude Code plugin agents plus ledger
+- **Evidence:** unique required frontmatter; `claude plugin validate . --strict` → passed
+- **Scope audit:** passed against Crossing 2 agent file contract
+- **Pack lifecycle after Crossing:** active
+- **Deviations:** none
+
 ## Open items
 
 | # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
