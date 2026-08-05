@@ -88,8 +88,8 @@ If implementation needs an unowned path, stop and request a scope amendment. Cle
 ### Crossing 4 - publish, refresh, and close feedback
 
 - [x] Run independent cross-family review and verification.
-- [ ] Commit/push source, update the marketplace installation, and smoke-test both hosts.
-- [ ] Mark feedback items done and accept the repair pack.
+- [x] Commit/push source, update the marketplace installation, and smoke-test both hosts.
+- [x] Mark feedback items done and accept the repair pack.
 
 ## Execution table
 

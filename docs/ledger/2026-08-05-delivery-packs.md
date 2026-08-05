@@ -33,21 +33,21 @@
 - **Multi-Crossing reason:** canonical workflow and two host-agent surfaces are disjoint implementation layers.
 - **Rollback strategy:** revert personal agents, plugin agents, then canonical workflow/docs in reverse order.
 - **Repairs:** feedback items 1–3
-- **Current candidate:** base `1a44687` + source-diff hash `84a89f7d6ced9ebd7744e0215874ebcc5ed1caba`
-- **Accepted candidate:** none
+- **Current candidate:** source commit `b15e18d1b47fe281a30405a1a7f6cd49dbc3972e`
+- **Accepted candidate:** source commit `b15e18d1b47fe281a30405a1a7f6cd49dbc3972e`
 
 ## Resume checkpoint
 
-- **State:** active
+- **State:** closed
 - **Updated:** 2026-08-05
-- **Active pack / Crossing:** `AIRLOCK-P02` / Crossings 1–3 candidate ready; publication pending
-- **Completed:** implementation, cross-family review, verification, review repair, and post-repair gates
-- **Changed paths:** canonical workflow; Claude and OpenCode agents; README, conventions, manifests; repair design/plan/ledger
-- **Fresh evidence:** `AIRLOCK-E07` through `AIRLOCK-E10`; source-diff hash `84a89f7d6ced9ebd7744e0215874ebcc5ed1caba`
-- **Blockers / decisions:** none; ledger section selected over a separate checkpoint file
+- **Active pack / Crossing:** `AIRLOCK-P02` / `AIRLOCK-P02-C04` accepted
+- **Completed:** source pushed; Claude marketplace/plugin updated to 1.2.1; both host orchestrators smoke-tested; feedback items 1–3 done
+- **Changed paths:** final plan and ledger closure only; ten global OpenCode agents remain active outside git
+- **Fresh evidence:** `AIRLOCK-E07` through `AIRLOCK-E11`; installed 1.2.1 exposes five skills and nine agents
+- **Blockers / decisions:** none; installed Claude smoke proves agent resolution and contract response, not tool execution by design
 - **Retained evidence:** repair design, plan, and this ledger; no external evidence artifacts
-- **Temporary artifacts / processes:** none
-- **Next action:** complete the staged-diff scope audit and commit the 1.2.1 source candidate
+- **Temporary artifacts / processes:** auto-created OpenCode truncated-output file removed by exact path; no processes remain
+- **Next action:** final Crossing `AIRLOCK-P02-C04` complete; collect future feedback through `airlock-review`
 
 ## Gate register
 
@@ -63,7 +63,7 @@
 | `AIRLOCK-G08` | `AIRLOCK-P02` | Claude plugin validation and manifest agreement | required | passed | — | — | — | `AIRLOCK-E08` |
 | `AIRLOCK-G09` | `AIRLOCK-P02` | OpenCode resolution | required | passed | — | — | — | `AIRLOCK-E09` |
 | `AIRLOCK-G10` | `AIRLOCK-P02` | independent review | required | passed | — | — | — | `AIRLOCK-E10` |
-| `AIRLOCK-G11` | `AIRLOCK-P02` | publication and host activation | required | pending | — | — | — | — |
+| `AIRLOCK-G11` | `AIRLOCK-P02` | publication and host activation | required | passed | — | — | — | `AIRLOCK-E11` |
 | `AIRLOCK-G12` | `AIRLOCK-P02` | cleanup | not-required | — | — | no temporary artifacts or processes were created | `2026-08-05` | all implementation and gate runners reported none |
 
 ## Gate evidence
@@ -80,6 +80,7 @@
 | `AIRLOCK-E08` | `AIRLOCK-G08` | base `1a44687` + source-diff hash `84a89f7d6ced9ebd7744e0215874ebcc5ed1caba` | `2026-08-05T15:08:01+02:00` | orchestrator | OpenCode | `openai/gpt-5.6-sol` | `claude plugin validate . --strict`; `ConvertFrom-Json` manifest comparison | Airlock source | passed | validation passed; both manifests version 1.2.1 |
 | `AIRLOCK-E09` | `AIRLOCK-G09` | global OpenCode agents aligned with source candidate | `2026-08-05T15:08:01+02:00` | orchestrator + verifier | OpenCode / `verify` | `openai/gpt-5.6-sol`; `alibaba-token-plan/deepseek-v4-flash-0731` | `opencode debug config`; ten-agent resolution/frontmatter inspection | user-scoped OpenCode config | passed | ten personal agents resolved; models, variants, and permissions preserved |
 | `AIRLOCK-E10` | `AIRLOCK-G10` | base `1a44687` + source-diff hash `84a89f7d6ced9ebd7744e0215874ebcc5ed1caba` | `2026-08-05T15:08:01+02:00` | independent reviewer | `review-glm` | `zai-coding-plan/glm-5.2` | full local diff and host-agent review | Airlock source + global OpenCode agents | passed | no blocker; checkpoint schema and heading consistency finding repaired; affected gates rerun |
+| `AIRLOCK-E11` | `AIRLOCK-G11` | source commit `b15e18d1b47fe281a30405a1a7f6cd49dbc3972e` | `2026-08-05T16:28:44+02:00` | orchestrator | installed Claude plugin + OpenCode global agent | `claude-opus-5` / high; `alibaba-token-plan/qwen3.8-max` / medium | `git push origin main`; marketplace/plugin update; `claude plugin list`; `claude plugin details`; installed Claude and OpenCode orchestrator smokes | GitHub, user-scoped Claude installation, and user-scoped OpenCode config | passed | commit pushed; Airlock 1.2.1 enabled with five skills and nine agents; both orchestrators returned the five-part contract |
 
 ## Crossings
 
@@ -179,13 +180,25 @@
 - **Pack lifecycle after Crossing:** candidate
 - **Deviations:** none
 
+### Crossing `AIRLOCK-P02-C04` — Publish, activate, and close repair — 2026-08-05
+
+- **Delivery Pack:** `AIRLOCK-P02`
+- **Commit:** this commit
+- **Candidate:** accepted source commit `b15e18d1b47fe281a30405a1a7f6cd49dbc3972e`
+- **Owned:** repair plan and ledger; external marketplace installation
+- **Touched:** plan and ledger; user-scoped Claude plugin updated outside git
+- **Evidence:** `AIRLOCK-G11` passed; installed Airlock 1.2.1 exposes five skills and nine agents; installed Claude and active OpenCode orchestrators returned the five-part contract
+- **Scope audit:** passed against Crossing 4 publish/activate contract
+- **Pack lifecycle after Crossing:** accepted
+- **Deviations:** initial push lacked interactive credentials and first Claude source smoke hit transient API overload; both succeeded on bounded retry
+
 ## Open items
 
 | # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
 |---|---|---|---|---|---|---|---|---|
-| 1 | user prompt 2026-08-05 | SHOULD_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C03` | `AIRLOCK-G07` | Standardize concise bullet-only orchestrator and subagent reports: outcome, changed paths, evidence, blockers, cleanup, actions. | resolved pending publication | `AIRLOCK-P02`; 19/19 host agents aligned |
-| 2 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G07` | Persist a bounded local resume checkpoint during active packs so compaction and fresh sessions can resume safely. | resolved pending publication | `AIRLOCK-P02`; canonical schema and lifecycle verified |
-| 3 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G12` | Classify and clean temporary probes, screenshots, and processes while retaining deliberate evidence in its configured home. | resolved pending publication | `AIRLOCK-P02`; exact-path policy verified; repair created no temporary artifacts |
+| 1 | user prompt 2026-08-05 | SHOULD_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C03` | `AIRLOCK-G07` | Standardize concise bullet-only orchestrator and subagent reports: outcome, changed paths, evidence, blockers, cleanup, actions. | done | `AIRLOCK-P02`; 19/19 host agents aligned and published |
+| 2 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G07` | Persist a bounded local resume checkpoint during active packs so compaction and fresh sessions can resume safely. | done | `AIRLOCK-P02`; canonical schema and lifecycle verified and published |
+| 3 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G12` | Classify and clean temporary probes, screenshots, and processes while retaining deliberate evidence in its configured home. | done | `AIRLOCK-P02`; exact-path policy published; temporary output removed by exact path |
 
 ## Debug records
 
