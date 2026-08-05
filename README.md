@@ -40,6 +40,16 @@ The **design** records what was approved, the **plan** records Delivery Packs, C
 
 The template ships with the completion gate at [`skills/ship/LEDGER.template.md`](skills/ship/LEDGER.template.md).
 
+## Concise reports and safe resume
+
+Orchestrators and subagents return five fact-only bullet groups: **Status**, **Changes/findings**, **Evidence**, **Artifacts/cleanup**, and **Action needed**. They do not restate prompts, plans, contracts, or long logs unless requested or needed to explain a failure.
+
+Each active pack keeps one bounded, orchestrator-owned **Resume checkpoint** in its ledger. It is replaced in place after agent returns, gates, human checkpoints, and scope changes, and before compaction or an unfinished stop. It records current work, paths, fresh evidence, blockers, retained/temporary artifacts, and one exact next action. Fresh sessions read the design, plan, ledger, and checkpoint before acting; accepted packs close the checkpoint against their final Crossing.
+
+## Artifact hygiene
+
+Every created non-product artifact is either retained evidence or temporary. Retained evidence moves to the project-configured evidence home and is referenced from the ledger. Agents remove only exact task-owned temporary paths/processes; broad cleanup and deletion of unknown, pre-existing, user-owned, or another lane's artifacts are forbidden. If temporary artifacts or processes existed, cleanup is a required pack gate. Browser agents retain only required captures and remove superseded task-created screenshots, downloads, traces, and logs without touching credentials, profiles, cookies, local storage, or user state.
+
 ## The failure this exists to prevent
 
 > Asked for "a standalone HTML tool outside the app", a subagent instead extended the existing program that generates the current HTML — adding runtime code and tests nobody wanted. Defensible in isolation; wrong against intent.
@@ -116,6 +126,7 @@ The skills are intentionally engine-, language-, model-, and host-agnostic. Supp
 - focused tests, full tests, lint, typecheck, build, and run commands that apply
 - spec/plan/ledger artifact homes and the review surface (local diff or PR)
 - browser/MCP availability, visual specs, screenshot homes, viewports, live targets, and cleanup policy
+- scratch/evidence homes and exact-path retention/cleanup rules
 - host role/model mapping and independent-review policy
 - architecture invariants (the few load-bearing files an agent must not touch)
 - protected local state to back up before mutating runs

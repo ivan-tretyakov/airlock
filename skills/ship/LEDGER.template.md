@@ -28,6 +28,21 @@ The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-
 - **Current candidate:** `<exact candidate or none>`
 - **Accepted candidate:** `<exact candidate or none>`
 
+## Resume checkpoint
+
+<!-- Orchestrator-owned bounded resume state. Replace these values in place; never append checkpoint snapshots. -->
+
+- **State:** active | closed
+- **Updated:** `<ISO-8601 timestamp>`
+- **Active pack / Crossing:** `<pack-id> / <crossing-id>`
+- **Completed:** `<concise completed tasks/Crossings; none if none>`
+- **Changed paths:** `<current attributable paths; none if none>`
+- **Fresh evidence:** `<evidence IDs or concise command/tool references and results; none if none>`
+- **Blockers / decisions:** `<unresolved blockers and approved decisions; none if none>`
+- **Retained evidence:** `<stable exact paths in configured evidence home plus ledger/gate references; none if none>`
+- **Temporary artifacts / processes:** `<exact task-owned paths/processes and cleanup state; none if none>`
+- **Next action:** `<one exact executable action; on closure, reference the final Crossing and post-ship handoff>`
+
 ## Gate register
 
 <!-- Applicability: required | not-required -->
@@ -54,6 +69,7 @@ The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-
 - **Owned:** `<paths from this Crossing’s file contract>`
 - **Touched:** `<paths from the final staged diff>`
 - **Evidence:** `<focused and required Crossing checks>` → `<result>`
+- **Artifacts / cleanup:** `<retained evidence references; temporary paths/processes and cleanup evidence; or none>`
 - **Scope audit:** passed against `<plan Crossing/file contract>`
 - **Pack lifecycle after Crossing:** active | accepted
 - **Deviations:** none
@@ -83,7 +99,11 @@ Rules:
 - Carry required gates and only plausibly relevant `not-required` decisions from the plan into the register. A `not-required` gate has `—` for gate state and evidence; it is not a pass or waiver.
 - Accept a pack only when every unwaived required gate has fresh `passed` evidence for its exact candidate. A waiver records approver/reason/date but neither changes applicability nor fabricates a pass.
 - A completed feedback item needs a checkable commit reference. `this commit` in an updated row means the commit shown by `git blame` for that row. Post-acceptance product changes use a linked repair Delivery Pack; do not rewrite historical acceptance.
+- The Resume checkpoint is the only durable resume state: keep one bounded section, replace it in place after each subagent return, gate, human checkpoint, or scope amendment and before compaction or an unfinished stop, and reference durable rows instead of copying history or logs. A fresh session reads the design, plan, ledger, and checkpoint first. At acceptance set it to `closed` and reference the final Crossing.
+- Move retained file evidence to the project-configured evidence home and reference it. If temporary artifacts or processes were created, a required cleanup gate records their exact task-owned paths/processes and proves removal/stoppage before acceptance. Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another lane's artifacts.
+- For Playwright/browser work, retain only required evidence; remove superseded task-created screenshots, downloads, traces, and logs. Never clean credentials, browser profiles, cookies, localStorage, or other user state.
 - `PARK` ends `parked` with a backlog reference. `OUT_OF_SCOPE` ends `rejected` with the scope reason.
 - Reconstructed entries include the reconstruction date and mark unproven evidence, approvals, and deviations `unknown`; never present them as contemporaneous records.
 - **Legacy 1.1:** a ledger with Crossings but no Delivery Pack section is one implicit pack, `legacy:<work-id>`. Preserve old Evidence text as unstructured and old `Status` as legacy review metadata, not pack lifecycle. Historical lifecycle, gate applicability/state, waiver, exact-candidate evidence, and approvals are `unknown`; never invent 1.2 gate evidence from a current run.
+- Ledgers without a Resume checkpoint remain valid. Add one only when work is actively resumed or repaired; do not retrofit checkpoint history.
 - Keep entries terse and commit ledger changes with the Crossing they describe.

@@ -9,7 +9,7 @@ Guessing wastes runs and can hide stale gate evidence. Move by evidence.
 
 ## Establish pack and gate context
 
-When the failure belongs to planned or shipped work, load its plan and ledger before changing files. Record a Debug row when the ledger is an owned process artifact; otherwise carry the proposed row into `review`/the repair pack instead of widening scope. Include:
+When the failure belongs to planned or shipped work, load its approved design, plan, ledger, and bounded Resume checkpoint before changing files. Record a Debug row when the ledger is an owned process artifact; otherwise carry the proposed row into `review`/the repair pack instead of widening scope. Include:
 
 - Delivery Pack ID and exact candidate/Crossing;
 - failed gate ID, or the named observed check if no planned gate covered it;
@@ -21,6 +21,8 @@ Do not invent a gate association. If the pack/gate is ambiguous, stop and ask. A
 
 For a legacy 1.1 ledger, treat all historical Crossings as one implicit `legacy:<work-id>` Delivery Pack. Preserve old evidence as unstructured and old `Status` as legacy review metadata. Historical lifecycle, gate state/applicability, waivers, and exact candidate remain `unknown`; never infer that a 1.2 gate passed.
 
+The ledger is the only durable resume store. When it is owned, replace its single Resume checkpoint in place with current pack/Crossing, completed diagnostic work, changed paths, fresh evidence, blockers/decisions, retained evidence, temporary artifacts/processes and cleanup state, and one exact next action. Refresh it after each bounded evidence/gate result, human checkpoint, or scope amendment and before compaction or an unfinished return. Reference Debug, gate, and evidence rows instead of pasting reproductions or logs. If the ledger is outside scope, report the proposed update rather than editing it. A legacy ledger without a checkpoint remains valid; add one only when work is actively resumed or repaired.
+
 ## Evidence loop
 
 1. **Reproduce deterministically.** Write a failing test or fixed-seed run. If it cannot be reproduced, gather the missing reproduction instead of claiming a fix.
@@ -31,6 +33,8 @@ For a legacy 1.1 ledger, treat all historical Crossings as one implicit `legacy:
 
 For stochastic, timing-sensitive, or tuning behavior, use the planned N-run/fixed-seed distribution, never one run.
 
+Classify every non-product probe, capture, log, download, trace, and temporary/background process created during diagnosis. Move retained file evidence to the project-configured evidence home under a stable exact path and reference it; remove or stop only exact task-owned temporary paths/processes before return when safe. Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another lane's artifacts. If ownership or cleanup is unsafe, leave it in place and block/report the exact item. For Playwright/browser work, retain only required evidence and remove superseded task-created screenshots, downloads, traces, and logs; never clean credentials, browser profiles, cookies, localStorage, or other user state.
+
 ## Route and reverify
 
 - **Active/candidate pack:** fix in the planned Crossing only if its approved file contract and outcome cover the change. Otherwise stop for a scope/plan amendment.
@@ -40,3 +44,15 @@ For stochastic, timing-sensitive, or tuning behavior, use the planned N-run/fixe
 After a substantive fix, update the Debug row’s **Gates to rerun** list and mark affected passed gates `stale`. The implementer reruns the focused reproduction; after code freeze, the planned verifier reruns only missing/stale required gates against the repair/current pack’s exact candidate. `debug` does not turn old evidence into a pass.
 
 Do not widen scope. If any required path is outside the approved contract, stop and surface it. Invoke **`ship`** for the resulting Crossing; it owns final gate freshness and pack acceptance.
+
+For an obvious standalone one-line typo with no active pack, keep handling lightweight; do not create a checkpoint store solely for it. Scope, evidence, artifact cleanup, and the concise return contract still apply.
+
+Use this exact five-bullet shape for every debug report:
+
+- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
+- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
+- **Evidence:** exact command/tool and result; name anything required but not run.
+- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
+- **Action needed:** `none` or one exact decision, blocker, or next action.
+
+Return only those bullets, using facts and actions. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.

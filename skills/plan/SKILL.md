@@ -40,6 +40,28 @@ Write to the project’s plans directory (default `docs/plans/YYYY-MM-DD-<topic>
 Keep checkbox tasks small (typically 2–15 minutes). For behavior changes, follow RED → GREEN → refactor: write the failing test, run it and state the expected failure, implement the minimum, then rerun it. Tick tasks before their Crossing ships; progress lives on disk. A Crossing must not intentionally leave the build broken.
 
 5. **Checkpoints and end-to-end proof.** Mark user diff checkpoints when a parallel group closes, an architecture invariant is touched, or later work depends on a judgment call. Keep long-running validation bounded and foreground. State the final proof of the outcome, not only unit checks.
+6. **Evidence and cleanup policy.** Name the project-configured evidence home. For tasks that may create non-product files or processes, state their ownership, retained-versus-temporary classification, exact-path/process cleanup, and cleanup gate.
+
+## Resume checkpoint
+
+The ledger is the only durable resume store. While work has an active pack, the orchestrator owns exactly one `## Resume checkpoint` section in the ledger. Replace its contents in place; never append checkpoint snapshots or create a parallel checkpoint file, message log, or state system.
+
+Keep the checkpoint bounded to these fields:
+
+- **State:** `active` or `closed`.
+- **Updated:** ISO-8601 timestamp.
+- **Active pack / Crossing:** exact IDs.
+- **Completed:** concise completed tasks/Crossings.
+- **Changed paths:** current attributable paths, not the whole worktree.
+- **Fresh evidence:** current evidence IDs or concise command/tool references and results.
+- **Blockers / decisions:** unresolved blockers and approved decisions.
+- **Retained evidence:** exact stable paths in the configured evidence home and their ledger/gate references.
+- **Temporary artifacts / processes:** exact task-owned paths/processes and cleanup state.
+- **Next action:** one exact executable action.
+
+Refresh it after every subagent return, gate result, human checkpoint, and scope amendment, as well as before likely context compaction and before ending with unfinished work. A fresh session reads the approved design, plan, ledger, and Resume checkpoint before acting. Reference Crossing, gate, evidence, and Debug rows instead of copying history or long logs into the checkpoint.
+
+At pack acceptance, replace the checkpoint once more, set **State** to `closed`, and identify the final Crossing; do not delete it. A Light single-Crossing pack may initialize and close the same compact checkpoint in one session. A legacy ledger without this section remains valid; add it only when work is actively resumed or repaired, without retrofitting historical state.
 
 ## Portable execution and host routing
 
@@ -84,6 +106,8 @@ For a plausibly relevant gate that is omitted, record one compact decision:
 
 Applicability (`required` or `not-required`), runtime gate state (`pending`, `running`, `passed`, `failed`, `blocked`, `stale`), and an approved waiver are separate facts. A waiver needs approver, reason, and date; it never changes applicability or fabricates a `passed` state.
 
+If any task creates a temporary non-product artifact or process, cleanup is a required gate rather than a discretionary gate. Its pass condition names the exact task-owned paths/processes and proves they were removed or stopped. Add the gate through an approved plan/ledger amendment if the need is discovered during execution.
+
 Implementers run focused RED/GREEN and Crossing checks. After code freeze, an independent verifier context or specialized gate role runs the required final pack gates against one exact candidate without editing source during gate execution. A pre-ship independent-review gate is part of acceptance; post-ship feedback belongs to Airlock **`review`**.
 
 Each final gate will record either a full commit/tree or `base SHA + staged product-diff hash`, plus timestamp, effective agent/model, command or MCP tool, environment, result, and artifact. Substantive changes to candidate-bearing paths make affected evidence `stale`.
@@ -93,6 +117,18 @@ Each final gate will record either a full commit/tree or `base SHA + staged prod
 When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use the host’s structured question tool when available and give a recommendation. One pack may mix inline and subagent tasks. Do not ask for a global inline/subagent choice, and do not execute a pack until its row, routing, and gates are approved.
 
 A Light, single-Crossing pack may use one compact route row and only its genuinely required gates. Explicit risk decisions still apply, but ceremony should not outweigh the work.
+
+## Concise return contract
+
+Use this exact five-bullet shape for every dispatch return and orchestrator report:
+
+- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
+- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
+- **Evidence:** exact command/tool and result; name anything required but not run.
+- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
+- **Action needed:** `none` or one exact decision, blocker, or next action.
+
+Return only those bullets, using facts and actions. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.
 
 ## Dispatch protocol
 
@@ -106,7 +142,14 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 >
 > **STOP rule:** if the task appears to require any path outside the allowlist, **STOP and report back. Do not edit it.** A blocked task reported honestly is a success; widened scope is not.
 
-Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, and evidence expected. After return, audit `git status --short` against the contract before accepting the work; surface out-of-contract paths instead of silently keeping or reverting them.
+Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the concise return contract above. Require the agent to classify every non-product artifact it creates:
+
+- **Retained evidence:** move file-based evidence to the project-configured evidence home under a stable exact path when that path is allowlisted, and return the intended ledger/gate reference. Otherwise return the exact source path for an orchestrator-owned move without widening scope.
+- **Temporary:** return every exact task-owned path/process and remove or stop it before returning when ownership is certain and cleanup is safe.
+
+Never authorize broad-glob cleanup or deletion of unknown, pre-existing, user-owned, or another lane's artifacts. If ownership or safe cleanup cannot be established, leave the item in place and return `blocked` with its exact path/process and required decision. For Playwright/browser work, retain only required evidence and remove superseded task-created screenshots, downloads, traces, and logs; never clean credentials, browser profiles, cookies, localStorage, or other user state.
+
+After return, audit `git status --short` and the attributable changed-path delta against the contract before accepting the work; surface out-of-contract paths instead of silently keeping, deleting, or reverting them. Verify returned artifact paths/processes and cleanup state, then replace the ledger Resume checkpoint in place.
 
 ## Implement
 
@@ -114,4 +157,4 @@ Activate one approved Delivery Pack and work its contiguous Crossings in order. 
 
 Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery Pack only when all unwaived required gates have fresh evidence for its exact candidate. Feedback after a shipped commit goes through **`review`**.
 
-If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence.
+If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence or checkpoint history.

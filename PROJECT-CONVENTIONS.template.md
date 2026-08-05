@@ -50,6 +50,9 @@ in it, brainstorm.
    validation must be bounded FOREGROUND runs inside the turn>`
 - **Browser and visual verification:** `<MCP/browser availability, startup URL, cited visual spec, screenshot
   home, required desktop/mobile viewports, and whether authenticated state can be shared with subagents>`
+- **Temporary artifact home:** `<approved task-owned scratch directory; exact-path cleanup only>`
+- **Retained evidence home:** `<stable screenshots/logs/traces directory and naming/reference convention>`
+- **Cleanup policy:** `<process stop command, retained-vs-temporary rules, and paths/state that must never be cleaned>`
 - **Live integration and cleanup:** `<approved throwaway target, allowed mutations, rollback/cleanup, and
   evidence that cleanup succeeded>`
 - **Host routing:** `<map Light/Standard/Complex/Critical + investigator/verifier/reviewer/visual roles to
