@@ -12,16 +12,16 @@
 
 ### Delivery Pack `AIRLOCK-P01` — Pack-aware cross-host orchestration
 
-- **Lifecycle:** candidate
-- **Review lifecycle:** in-progress
+- **Lifecycle:** accepted
+- **Review lifecycle:** awaiting-review
 - **Acceptance:** Canonical Airlock and both hosts resolve the approved pack/routing/gate workflow.
 - **Crossings:** planned 1–4, contiguous
 - **Dependencies:** none
 - **Multi-Crossing reason:** canonical semantics, Claude agents, and OpenCode personal integration are separately reviewable layers of one outcome.
 - **Rollback strategy:** reverse personal configuration, then host-agent and canonical-workflow changes in reverse order.
 - **Repairs:** none
-- **Current candidate:** base `b84e6ef` + staged product-diff hash `68cd9bab63fae1d58b9a2691ab28a09b2ac759b1`
-- **Accepted candidate:** none
+- **Current candidate:** commit `71a8b4e6f60327b7beadc077e994ce9003dbbfaf`, tree `adc5e224960942b2c775293c05c684449049cb33`
+- **Accepted candidate:** commit `71a8b4e6f60327b7beadc077e994ce9003dbbfaf`, tree `adc5e224960942b2c775293c05c684449049cb33`
 
 ## Gate register
 
@@ -32,7 +32,7 @@
 | `AIRLOCK-G03` | `AIRLOCK-P01` | Claude plugin validation | required | passed | — | — | — | `AIRLOCK-E03` |
 | `AIRLOCK-G04` | `AIRLOCK-P01` | OpenCode resolution | required | passed | — | — | — | `AIRLOCK-E04` |
 | `AIRLOCK-G05` | `AIRLOCK-P01` | independent review | required | passed | — | — | — | `AIRLOCK-E05` |
-| `AIRLOCK-G06` | `AIRLOCK-P01` | published Claude activation | required | blocked | — | — | — | marketplace installation remains 1.1.0 until release |
+| `AIRLOCK-G06` | `AIRLOCK-P01` | published Claude activation | required | passed | — | — | — | `AIRLOCK-E06` |
 
 ## Gate evidence
 
@@ -43,6 +43,7 @@
 | `AIRLOCK-E03` | `AIRLOCK-G03` | base `b84e6ef` + diff `68cd9bab63fae1d58b9a2691ab28a09b2ac759b1` | `2026-08-05T13:16:33+02:00` | verifier | `verify` | `alibaba-token-plan/deepseek-v4-flash-0731` | `claude plugin validate . --strict` and source plugin details | Airlock source | passed | version 1.2.0; five skills; nine agents |
 | `AIRLOCK-E04` | `AIRLOCK-G04` | base `b84e6ef` + diff `68cd9bab63fae1d58b9a2691ab28a09b2ac759b1` | `2026-08-05T13:16:33+02:00` | verifier | `verify` | `alibaba-token-plan/deepseek-v4-flash-0731` | `opencode debug config`, agent/skill/MCP inspection | promo-price-change | passed | models, variants, source skills, and two MCPs resolved |
 | `AIRLOCK-E05` | `AIRLOCK-G05` | base `b84e6ef` + diff `68cd9bab63fae1d58b9a2691ab28a09b2ac759b1` | `2026-08-05T13:16:33+02:00` | independent reviewer | `review-glm` | `zai-coding-plan/glm-5.2` | full local diff review | Airlock + host configs | passed | no remaining source blockers |
+| `AIRLOCK-E06` | `AIRLOCK-G06` | commit `71a8b4e6f60327b7beadc077e994ce9003dbbfaf`, tree `adc5e224960942b2c775293c05c684449049cb33` | `2026-08-05T13:21:30+02:00` | orchestrator | `airlock:orchestrator` | `claude-opus-5` / high | marketplace update, installed details, and `claude -p --agent airlock:orchestrator` smoke | user-scoped Claude Code installation | passed | version 1.2.0; nine agents; `AIRLOCK_ORCHESTRATOR_OK` |
 
 ## Crossings
 
@@ -80,6 +81,18 @@
 - **Evidence:** gates `AIRLOCK-G01` through `AIRLOCK-G05` passed; `AIRLOCK-G06` blocked until publication
 - **Scope audit:** passed against Crossing 3 file contract
 - **Pack lifecycle after Crossing:** candidate
+- **Deviations:** none
+
+### Crossing `AIRLOCK-P01-C04` — Publish and activate — 2026-08-05
+
+- **Delivery Pack:** `AIRLOCK-P01`
+- **Commit:** this commit
+- **Candidate:** accepted source commit `71a8b4e6f60327b7beadc077e994ce9003dbbfaf`, tree `adc5e224960942b2c775293c05c684449049cb33`
+- **Owned:** plan and ledger process artifacts; external marketplace installation and user settings
+- **Touched:** plan and ledger; user-scoped plugin updated and Claude main-agent setting enabled outside git
+- **Evidence:** `AIRLOCK-G06` passed; installed Airlock 1.2.0 exposes nine agents; fresh orchestrator smoke returned `AIRLOCK_ORCHESTRATOR_OK`
+- **Scope audit:** passed against Crossing 4 publish/activate contract
+- **Pack lifecycle after Crossing:** accepted
 - **Deviations:** none
 
 ## Open items

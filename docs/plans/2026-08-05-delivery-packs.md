@@ -138,10 +138,10 @@ Expected RED: resolved configuration contains unsupported `high` for Qwen and `l
 
 ### Crossing 4 - publish and activate
 
-- [ ] Push the first three Crossings to `origin/main`.
-- [ ] Refresh the Airlock marketplace and update the installed plugin to 1.2.0.
-- [ ] Confirm the installed plugin exposes nine agents, then set Claude's main agent to `airlock:orchestrator`.
-- [ ] Start fresh host inspections and record the publication gate before accepting the pack.
+- [x] Push the first three Crossings to `origin/main`.
+- [x] Refresh the Airlock marketplace and update the installed plugin to 1.2.0.
+- [x] Confirm the installed plugin exposes nine agents, then set Claude's main agent to `airlock:orchestrator`.
+- [x] Start fresh host inspections and record the publication gate before accepting the pack.
 
 Expected RED: installed marketplace details show 1.1.0 and zero agents. GREEN: installed details show 1.2.0 and nine agents, Claude settings select the orchestrator, and OpenCode still resolves its source skills and MCPs.
 
