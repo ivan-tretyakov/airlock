@@ -5,7 +5,7 @@ description: Ships one scope-audited, buildable Crossing and records exact-candi
 
 # Ship — seal one Crossing with evidence
 
-Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable commit; a **Delivery Pack** is a coherent outcome made from one or more contiguous Crossings.
+Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable commit; a **Delivery Pack** is a coherent outcome made from one or more contiguous Crossings. Under an approved external handoff, the worker commit is a product candidate precursor, not a Crossing; the following orchestrator-owned process-artifact commit is the Crossing and references that candidate.
 
 ## 1. Load the planned boundary
 
@@ -18,7 +18,7 @@ Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable com
 
 Before a mutating validation run, back up irreplaceable local state named in project instructions and restore it afterward. Never expose credentials. For stochastic behavior, use the planned fixed-seed distribution rather than one run.
 
-Follow any shared-worktree sync rule before sealing the candidate. When parallel sessions may share the checkout, run `git pull --rebase --autostash` if project policy requires it. Then:
+Follow any shared-worktree sync rule before sealing the candidate. When parallel sessions may share the checkout, run `git pull --rebase --autostash` if project policy requires it. For an external-worker candidate, all sync happens before the pre-dispatch `HEAD` capture; never pull or rewrite history between dispatch and the return audit. Use the following normal sealing path unless the approved route uses the external handoff below:
 
 1. Use **scoped `git add` only** for this Crossing. Never `git add -A` or `git add .`.
 2. Read `git diff --cached --name-status` for **Touched** and compare every path with this Crossing’s file contract and process artifacts. Unstage and surface anything outside scope; do not silently keep or revert it.
@@ -31,6 +31,22 @@ Follow any shared-worktree sync rule before sealing the candidate. When parallel
 The product diff includes the plan’s substantive code, tests, configuration, artifacts, and cited specs. Record its included paths and hash method. Ledger bookkeeping and purely administrative plan progress may be excluded.
 
 This is code freeze. Any later substantive candidate-bearing change creates a new candidate and makes affected final evidence `stale`.
+
+### 2A. Audit an external worker candidate
+
+Use this handoff only when the approved route grants permission for `one scoped product candidate commit`. Otherwise the worker must not commit and the normal sealing path above applies. The worker may commit only product candidate-bearing paths in its exact file contract, and its commit message must include the exact Crossing ID. It may not edit or commit the design, plan, ledger, or other process artifacts, and it may not push or publish.
+
+A timed-out, killed, or indeterminate return is not yet a candidate return. Follow `plan`'s exact-process stop and no-edit checkout classification, update the checkpoint only when safe, and continue below only for a verified `one-commit` state.
+
+On a complete foreground return, or after safely classifying a disrupted return as `one-commit`, deterministically audit the local checkout before any orchestrator edit, stage, or commit and record:
+
+1. the returned session ID and completion state; the approved role, branch, and selected runtime/agent/model/variant; the returned effective runtime/agent/model/variant; and the full permission/containment policy identity and effective-policy proof;
+2. the approved current branch, the pre-dispatch `HEAD` as the candidate's sole parent, the candidate as current `HEAD`, and a commit count of exactly `1` from that parent;
+3. the full candidate and tree SHAs, its Crossing-ID-bearing commit message, and the complete `git diff --name-status <parent>..<candidate>`, all within the product file contract and containing no process artifact;
+4. an empty `git diff --cached --name-status`, the complete post-return `git status --short`, and its exact delta from the recorded baseline, with owned paths clean and every unrelated baseline entry preserved; and
+5. fresh returned evidence and the identity, retention, and cleanup state of every exact artifact, session, and process.
+
+Any mismatch stops the candidate for a user decision. Preserve the returned history and state: do not silently reset, rebase, amend, revert, clean, or otherwise rewrite it. A passing audit freezes the worker commit as the product candidate precursor; subsequent gates exercise that exact SHA/tree, and process-only ledger work does not stale it. This audit proves local-checkout state only; external side effects remain guardrail and self-report territory.
 
 ## 3. Use fresh evidence, without duplicate runs
 
@@ -49,7 +65,9 @@ Every gate has three independent dimensions:
 - **Gate state:** `pending`, `running`, `passed`, `failed`, `blocked`, or `stale`.
 - **Waiver:** approver, reason, and date. A waiver does not change applicability or turn a gate state into `passed`.
 
-Each evidence record identifies: gate ID, exact candidate, timestamp, executor host role and effective agent/model, command or MCP tool, environment/target, result, and artifact reference. A substantive code, test, configuration, generated-artifact, or cited-spec change stales every affected gate; a ledger-only bookkeeping edit does not. After commit, the commit and tree SHAs become the accepted candidate identity; retain the pre-commit base/diff hash in the evidence record that was actually exercised.
+Each evidence record identifies: gate ID, exact candidate, timestamp, executor host role and effective runtime/agent/model/variant, command or MCP tool, environment/target, result, and artifact reference. External evidence also records the effective route and full permission/containment policy identity and proof. A substantive code, test, configuration, generated-artifact, or cited-spec change stales every affected gate; a ledger-only bookkeeping edit does not. For the normal staged path, the resulting commit/tree becomes the candidate identity; for an external handoff, the worker precursor SHA/tree remains the candidate and the orchestrator Crossing commit is recorded separately. Retain any pre-commit base/diff hash that gates actually exercised.
+
+If a required gate fails after a worker candidate commit, or a candidate-bearing change makes its evidence stale, mark the gate/evidence and pack's current candidate `failed` or `stale`, and record it under checkpoint **Fresh evidence** and **Blockers / decisions**; do not add a Crossing entry or create the orchestrator Crossing commit. With explicit approval, a successor worker run starts from current `HEAD`, passes the full pre-dispatch checks, and may add exactly one new candidate commit; that SHA/tree becomes the current candidate. The other permitted recovery is an explicit user-approved revert commit. Preserve prior candidates and evidence; never silently reset, rebase, amend, or revert them.
 
 Classify every non-product artifact and every temporary process created during implementation, verification, or shipping:
 
@@ -82,10 +100,11 @@ Use the exact ledger path from the plan; initialize it from `LEDGER.template.md`
 ### Crossing `<crossing-id>` — `<name>` — `<YYYY-MM-DD>`
 
 - **Delivery Pack:** `<pack-id>`
-- **Commit:** this commit (locate with `git log -S '<crossing-id>' --oneline -- <ledger-path>`)
-- **Candidate:** `<commit/tree or base SHA + staged product-diff hash>`
+- **Commit:** this commit (the orchestrator Crossing; locate with `git log -S '<crossing-id>' --oneline -- <ledger-path>`)
+- **Candidate:** `<external worker precursor commit/tree, existing commit/tree, or base SHA + staged product-diff hash>`
 - **Owned:** `<this Crossing’s paths>`
-- **Touched:** `<final git diff --cached --name-status, including process artifacts>`
+- **Touched:** `<final Crossing git diff --cached --name-status; process artifacts only for an external handoff>`
+- **External handoff audit:** `n/a` or `<session/completion; approved branch; parent; commit count; candidate/tree; Crossing-ID-bearing candidate message; candidate changed names; index; status delta; selected/effective route; full permission/containment policy identity + proof; evidence; exact artifacts/cleanup>`
 - **Evidence:** `<focused/current Crossing checks and result>`
 - **Artifacts / cleanup:** `<retained evidence references; temporary paths/processes and cleanup evidence; or none>`
 - **Scope audit:** passed against `<plan Crossing/file contract>`
@@ -93,17 +112,17 @@ Use the exact ledger path from the plan; initialize it from `LEDGER.template.md`
 - **Deviations:** none
 ```
 
-Give every Crossing a unique ID. Record approved deviations; write `none` only after the audit. On final acceptance, store the exact accepted candidate and structured gate evidence in the Delivery Pack section.
+Give every Crossing a unique ID. Record approved deviations; write `none` only after the audit. On final acceptance, store the exact accepted candidate and structured gate evidence in the Delivery Pack section. For an external handoff, `git log -S` locates the orchestrator Crossing commit because it adds the ledger entry. Locate its worker precursor with `git show <candidate-sha>` or by the recorded exact commit message using `git log --all --fixed-strings --grep='<candidate-message>' --oneline`.
 
 Set that pack’s review lifecycle to `awaiting-review` when accepted and `in-progress` beforehand. For a `review` Crossing, preserve its `resolving` or `cleared` state; review state never rewrites pack acceptance.
 
 After each gate or cleanup result and before any unfinished return, replace the ledger's bounded Resume checkpoint in place with current paths, fresh evidence, artifact/cleanup state, blockers, and exact next action. Do not append snapshots or paste logs. On final acceptance, set checkpoint **State** to `closed` and reference the final Crossing. A missing checkpoint in a legacy ledger does not invalidate its history; add one only when that work is resumed or repaired.
 
-Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recompute the candidate hash if any candidate-bearing path changed. Process-only ledger staging does not stale evidence.
+Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recompute the candidate hash if any candidate-bearing path changed. Process-only ledger staging does not stale evidence. For an external handoff, stage only orchestrator-owned process artifacts in the Crossing commit, keep worker product paths clean, and reference the audited worker SHA/tree as the candidate.
 
 ## 6. Commit and report
 
-- Follow project commit-message conventions, including required trailers, plus branch/pull/push policy. Commit the ledger entry with the Crossing; push only when policy allows it or the user asks.
+- Follow project commit-message conventions, including required trailers, plus branch/pull/push policy. The orchestrator commits the ledger entry with the Crossing and, for an external handoff, references the worker SHA/tree and fresh evidence. Only the orchestrator may push or publish, and only when policy allows it or the user asks.
 - Verify with `git show --stat --oneline HEAD`.
 - Do not call an active pack accepted.
 
