@@ -2,6 +2,81 @@
 
 Airlock's canonical workflow lives in `skills/`. The OpenCode adapter adds namespaced wrapper skills and explicit commands; it does not duplicate the workflow bodies.
 
+## External-runtime worker
+
+The reviewed worker source is [`agents/airlock-worker.md`](agents/airlock-worker.md). Install a byte-identical copy at `~/.config/opencode/agents/airlock-worker.md`; no `opencode.jsonc` change is required. The worker is `mode: primary` because `opencode run --agent` cannot target a `mode: subagent` agent: OpenCode warns and falls back to its default primary. It deliberately has no fixed model or variant.
+
+Quit and restart OpenCode after installing or changing the agent; configuration-time files are not hot-reloaded. Resolve configuration from the actual target directory and verify `agent.airlock-worker` is primary, has no `model` or `variant`, and denies `task` and `question`:
+
+```text
+opencode debug config
+```
+
+This proves only the installed agent's static resolution. It does not prove the merged per-run policy. Project and inline configuration can affect resolution, so repeat the static preflight for each target checkout and abort on an unexpected override or fallback warning. Separately, the approved denied-operation probe must prove that the exact per-run policy overrides ambient permissions.
+
+### Closed foreground invocation
+
+Every dispatch passes its approved model, variant, directory, and JSON format explicitly:
+
+```text
+opencode --pure run --agent airlock-worker \
+  --model <provider/model> --variant <variant> \
+  --dir <absolute-target-directory> --format json \
+  <complete-closed-dispatch-prompt>
+```
+
+Never add `--auto`. The caller enforces the approved foreground timeout, serializes file-writing runs per checkout, and performs no file or Git operation in that checkout until the worker returns. Read-only runs may overlap only when they cannot contend for mutable state.
+
+For each process, set non-secret `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` values rather than relying on ambient defaults. The successful inline-config probe used exactly these non-secret keys: `$schema`, `autoupdate`, `snapshot`, `share`, `default_agent`, `model`, `small_model`, `subagent_depth`, `instructions`, `lsp`, `formatter`, and `compaction`. Route-specific model values must agree with the explicit CLI route. That successful object did not include an `mcp` key; `--pure` plus the total tool policy denies unapproved plugin, MCP, and custom tools.
+
+Construct the last-match-wins permission policy in this order:
+
+1. `OPENCODE_PERMISSION` is merged after ambient configuration; its top-level `"*": "deny"` therefore replaces a prior ambient wildcard allow. Put exact per-tool policies after that top-level deny.
+2. Inside each granular tool policy, put `"*": "deny"` first, then exact approved allows, then explicit high-risk denies after any overlapping allows. High-risk final denies cover environment/auth/credential reads, configuration or unowned edits, undeclared external directories, arbitrary shell/network operations, and push/publish/history rewriting.
+3. Keep the agent's static `task: deny` and `question: deny` as the final per-agent rules. They are the only static containment; edit, shell, fetch, external-directory, and every other tool restriction must come from the total per-run policy.
+
+Record the full config and permission JSON, or immutable sources plus content hashes, as the orchestrator-owned policy identity. The dispatch contains that immutable identity and a reference to the completed denied-operation precedence proof; the worker confirms their presence rather than re-proving precedence. Disable interactive Git credential prompts and inherited SSH-agent access for the child process. The exact Bash allowlist and worker contract still deny every remote operation.
+
+The prompt must contain the approved Pack/Crossing IDs, selected and expected effective route, exact file contract and STOP rule, approved commands, timeout, commit permission, immutable policy identity plus precedence-proof reference, and artifact/session policy. The worker refuses an incomplete dispatch before tool use.
+
+### JSON and session lifecycle
+
+`--format json` emits newline-delimited JSON. The C01 probe observed top-level `type`, `timestamp`, and `sessionID` fields plus event-specific `part` data, with `step_start`, `tool_use`, `step_finish`, and `text` event types. It observed tool and terminal-state data under `tool_use.part`, return text under `text.part.text`, and reason/cost/token data under `step_finish.part` when supplied. Treat this as an observed sub-schema, not a stable contract: parse each line defensively, validate fields before use, tolerate additive fields, and classify missing required identity/completion data as indeterminate. An `error` event or non-zero process exit remains a failure; never infer completion from a text event alone. Record the session ID, completion classification, selected/effective agent/model/variant, policy identity/proof reference, and evidence summary.
+
+Resume only by exact session ID after re-verifying branch, parent, index, full status baseline, and attributable delta. A plain continuation must use the same approved model, variant, and route as the original run and must reapply the complete policy:
+
+```text
+opencode --pure run --session <session-id> \
+  --agent airlock-worker --model <same-provider/model> --variant <same-variant> \
+  --dir <absolute-target-directory> --format json <resume-prompt>
+```
+
+Current evidence does not prove that resume flags override stored session metadata. Independently verify the effective session metadata before allowing work. If any selected route field changes, fork the session and independently verify the fork's effective metadata before work:
+
+```text
+opencode --pure run --session <session-id> --fork \
+  --agent airlock-worker --model <approved-provider/model> --variant <approved-variant> \
+  --dir <absolute-target-directory> --format json <fork-prompt>
+```
+
+After a session is accepted or abandoned and any approved sanitized export is complete, clean it separately by exact ID:
+
+```text
+opencode session delete <exact-session-id>
+```
+
+Never use an ambiguous “last session” for cleanup.
+
+### Candidate commit and audit
+
+Before dispatch, the orchestrator records the branch, full `HEAD`, empty cached diff, complete `git status --short`, clean owned paths, and effective policy proof. With no commit permission the worker neither stages nor commits. With permission for one candidate, it may create at most one product commit, stages only explicit owned paths, audits `git diff --cached --name-status`, includes the exact Crossing ID in the message, and never edits process artifacts or pushes, publishes, amends, resets, rebases, or merges.
+
+After return, the orchestrator verifies the recorded parent, exactly one commit, candidate/tree and message, complete changed-name set, empty index, full status delta, effective route, evidence, and exact cleanup. A mismatch stops without rewriting history. The orchestrator alone owns the ledger/Crossing commit and any push or publication.
+
+### Security and cleanup boundary
+
+The worker is a user-account process with advisory model instructions plus deterministic permissions and post-return audits. These guardrails limit and detect ordinary scope drift; they are not adversarial isolation. Never inspect credentials, authentication files, environment values, browser state, or unrelated user state. On blocked or partial runs, stop/remove only exact attributable owned processes and paths; leave unknown or pre-existing state untouched and report it.
+
 ## Use this checkout
 
 This repository's [`opencode.json`](../../opencode.json) registers `adapters/opencode/skills/`. Those wrappers delegate to the canonical workflows in the root `skills/` directory, while `.opencode/command/` supplies:

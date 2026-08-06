@@ -87,13 +87,13 @@ If implementation or a gate needs an unowned path, stop and request a scope amen
 
 ### Crossing 2 - OpenCode Worker
 
-- [ ] 18. Add targetable `mode: primary` source agent at `adapters/opencode/agents/airlock-worker.md` with no nested delegation and the five-part return contract.
-- [ ] 19. Install the reviewed identical agent at `C:/Users/IvanTretyakov/.config/opencode/agents/airlock-worker.md` without changing global config or existing agents.
-- [ ] 20. Document invocation, total permissions, model/variant override, session handling, and security limits in `adapters/opencode/README.md`.
-- [ ] 21. Verify `opencode debug config`, primary-agent targeting, effective model/variant, denial behavior, and one product commit in the disposable repo.
-- [ ] 22. Obtain independent GLM review of permissions and active-branch behavior.
-- [ ] 23. Update ledger evidence/checkpoint, stage only C02 repository paths, audit cached names, and ship C02.
-- [ ] 24. Delete exact test sessions/temp paths and verify the global worker remains the only external state.
+- [x] 18. Add targetable `mode: primary` source agent at `adapters/opencode/agents/airlock-worker.md` with no nested delegation and the five-part return contract.
+- [x] 19. Install the reviewed identical agent at `C:/Users/IvanTretyakov/.config/opencode/agents/airlock-worker.md` without changing global config or existing agents.
+- [x] 20. Document invocation, total permissions, model/variant override, session handling, and security limits in `adapters/opencode/README.md`.
+- [x] 21. Verify `opencode debug config`, primary-agent targeting, effective model/variant, denial behavior, and one product commit in the disposable repo.
+- [x] 22. Obtain independent GLM review of permissions and active-branch behavior.
+- [x] 23. Update ledger evidence/checkpoint, stage only C02 repository paths, audit cached names, and ship C02.
+- [x] 24. Delete exact test sessions/temp paths and verify the global worker remains the only external state.
 
 ### Crossing 3 - Claude Bridge and Release Source
 
