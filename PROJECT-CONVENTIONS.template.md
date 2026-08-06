@@ -57,6 +57,14 @@ in it, brainstorm.
   evidence that cleanup succeeded>`
 - **Host routing:** `<map Light/Standard/Complex/Critical + investigator/verifier/reviewer/visual roles to
   configured agents and models; state the independent-review policy and accepted downgrade>`
+- **Allowed external runtimes:** `<runtime names permitted here; state none when external dispatch is forbidden>`
+- **External route mapping:** `<runtime → approved agent/model/variant mapping; every external plan route names runtime, agent, model, and variant>`
+- **External worker commit permission:** `<none, or one scoped product candidate commit; state that the orchestrator owns the ledger Crossing>`
+- **External foreground timeout:** `<per-route maximum duration and exact timeout/stop handling>`
+- **External temp/session/evidence homes:** `<exact approved temporary, session, and retained-evidence homes; exact-ID/path cleanup policy>`
+- **External writers on the active branch:** `<allowed or forbidden; if allowed, serialize writers per checkout and prohibit orchestrator checkout activity during dispatch>`
+- **External launcher + Node:** `<Node prerequisite and the approved ${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs manifest/hash invocation>`
+- **External runtime executable:** `<required direct executable; on Windows state the direct .exe path/provider and whether shell shims fail closed>`
 - **Stochastic/tuning verification:** `<e.g. never judge balance from one run — use N-seed distributions via
   the harness at tools/harness>`
 - **Generated-asset provenance:** `<e.g. all AI images go through tools/gen_art.py; each appends a row to

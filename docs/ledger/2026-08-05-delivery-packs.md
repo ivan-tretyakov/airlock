@@ -46,21 +46,21 @@
 - **Multi-Crossing reason:** canonical semantics, OpenCode worker, Claude bridge, and release activation are independently auditable layers of one outcome.
 - **Rollback strategy:** disable/remove the global worker, revert activation, then host and canonical changes in reverse order.
 - **Repairs:** none; user-requested capability 2026-08-06
-- **Current candidate:** base `13e5e44` + product-diff hash `ec73f5bbf6c8094e394db61123a59e7e0f5135d1`
+- **Current candidate:** base `819ce33` + product-diff hash `439b8b0324747e831282e6554cb62238a2931797`
 - **Accepted candidate:** none
 
 ## Resume checkpoint
 
 - **State:** active
 - **Updated:** 2026-08-06
-- **Active pack / Crossing:** `AIRLOCK-P03` / `AIRLOCK-P03-C02` ready to commit
-- **Completed:** C01 committed; C02 implementation, G15, independent review, cleanup, and staged-diff audit complete
-- **Changed paths:** adapter worker source/README, identical global worker, plan/ledger
-- **Fresh evidence:** `AIRLOCK-E12` through `AIRLOCK-E14`; installed worker targeted without fallback and created one exact disposable commit
-- **Blockers / decisions:** none; template scope amendment approved; use proven `git status --short`, not `--porcelain=v1`
+- **Active pack / Crossing:** `AIRLOCK-P03` / `AIRLOCK-P03-C03` ready to commit
+- **Completed:** C03 implementation, debug repair, G16/G18, cleanup, and staged-diff audit complete
+- **Changed paths:** C03 launcher/tests, Claude agents, root/adapter docs, conventions, manifests, process artifacts
+- **Fresh evidence:** `AIRLOCK-E15`, `AIRLOCK-E16`; deterministic source bridge and frozen full candidate have no blocking findings
+- **Blockers / decisions:** none; `AIRLOCK-D01` resolved by approved deterministic-launcher and foreground-return amendments
 - **Retained evidence:** P03 design, plan, and this ledger
-- **Temporary artifacts / processes:** all feasibility/C02 probe repos, sessions, and output files removed by exact path/ID; no process remains
-- **Next action:** commit `AIRLOCK-P03-C02`, then implement the Claude bridge and 1.3.0 release source
+- **Temporary artifacts / processes:** all debug/source-smoke sessions, manifests, NDJSON, and residual zero-byte `.err` file deleted/verified absent; no task-owned process remains
+- **Next action:** commit and push `AIRLOCK-P03-C03`, then update/install 1.3.0 for C04
 
 ## Gate register
 
@@ -81,9 +81,9 @@
 | `AIRLOCK-G13` | `AIRLOCK-P03` | inline config and permission precedence | required | passed | — | — | — | `AIRLOCK-E12` |
 | `AIRLOCK-G14` | `AIRLOCK-P03` | canonical external-runtime consistency | required | passed | — | — | — | `AIRLOCK-E13` |
 | `AIRLOCK-G15` | `AIRLOCK-P03` | OpenCode worker resolution and lifecycle | required | passed | — | — | — | `AIRLOCK-E14` |
-| `AIRLOCK-G16` | `AIRLOCK-P03` | Claude plugin validation | required | pending | — | — | — | — |
+| `AIRLOCK-G16` | `AIRLOCK-P03` | Claude plugin validation | required | passed | — | — | — | `AIRLOCK-E15` |
 | `AIRLOCK-G17` | `AIRLOCK-P03` | installed end-to-end dispatch | required | pending | — | — | — | — |
-| `AIRLOCK-G18` | `AIRLOCK-P03` | independent security/process review | required | pending | — | — | — | — |
+| `AIRLOCK-G18` | `AIRLOCK-P03` | independent security/process review | required | passed | — | — | — | `AIRLOCK-E16` |
 | `AIRLOCK-G19` | `AIRLOCK-P03` | cleanup | required | pending | — | — | — | — |
 | `AIRLOCK-G20` | `AIRLOCK-P03` | publication and activation | required | pending | — | — | — | — |
 
@@ -105,6 +105,8 @@
 | `AIRLOCK-E12` | `AIRLOCK-G13` | baseline Airlock `f923708`; standalone disposable repo candidates `9f10980` → `605efbc` | `2026-08-06T08:26:32+02:00` | critical probe | `code-critical` → temporary OpenCode primary worker | Sol max → `openai/gpt-5.4-mini` | `opencode --pure run --format json` with inline config/total permissions; git parent/count/path/index audit; session continue/fork/delete | exact disposable repo under approved OpenCode temp home | passed | later inline deny overrode ambient allow; unsafe operations denied; one `owned.txt` commit; JSON `step_start/tool_use/step_finish/text`; four sessions and all temp/output paths removed |
 | `AIRLOCK-E13` | `AIRLOCK-G14` | base `f923708` + current C01 source/design diff | `2026-08-06T09:15:19+02:00` | independent reviewer | `review-glm` | `zai-coding-plan/glm-5.2` | canonical diff inspection and cross-skill consistency review | Airlock C01 working tree | passed | external precursor/Crossing ownership, timeout, failed-candidate recovery, bounded checkpoint, permissions, traceability, and normal Crossings consistent; no blocker |
 | `AIRLOCK-E14` | `AIRLOCK-G15` | C02 adapter source + byte-identical global worker; disposable `5d388e5` → `8c737ed` | `2026-08-06T09:54:38+02:00` | critical probe + independent reviewer | actual `airlock-worker`; `review-glm` | `openai/gpt-5.4-mini`, variant none; `zai-coding-plan/glm-5.2` | closed `opencode --pure run --agent airlock-worker --format json`; config resolution; parent/count/path/message/index/status audit; source/global hash; independent review | global OpenCode agent + exact disposable repo | passed | no fallback; one `owned.txt` commit with `AIRLOCK-P03-C02-PROBE`; five headings; session/repo removed; source/global SHA-256 `EC9C97C…`; no blocker |
+| `AIRLOCK-E15` | `AIRLOCK-G16` | C03 working candidate after `819ce33` | `2026-08-06T12:13:24+02:00` | orchestrator + verifier | source `airlock:orchestrator` → `airlock:external-runner` → `airlock-worker` | Fable/high → Haiku/medium → `openai/gpt-5.4-mini`/none | 21 Node tests; strict plugin validation; hashed-manifest source-plugin read-only dispatch; exact export/delete/absence checks | Airlock source + approved OpenCode temp home | passed | five skills/ten agents; direct-exe-npm; effective identity proof; read 1/1; terminal stop; five headings; session `ses_029720983ffeCqsKK9x8mp4cgC`, manifest, and NDJSON deleted/verified absent |
+| `AIRLOCK-E16` | `AIRLOCK-G18` | frozen C03 working candidate after `819ce33` | `2026-08-06T12:26:34+02:00` | independent reviewer + verifier | `review-glm`; `verify` | `zai-coding-plan/glm-5.2`; `alibaba-token-plan/deepseek-v4-flash-0731` | full source/global diff review; 21 Node tests; syntax; strict plugin validation; config/agent/version/path/secret/cleanup audits | Airlock source, global worker, approved temp home | passed | no blocking/high finding; contract clean; residual `.err` found by verifier and removed by exact path before staging |
 
 ## Crossings
 
@@ -244,6 +246,20 @@
 - **Pack lifecycle after Crossing:** active
 - **Deviations:** effective probe variant recorded as none; resume model changes require fork plus independent verification
 
+### Crossing `AIRLOCK-P03-C03` — Deterministic Claude-to-OpenCode bridge — 2026-08-06
+
+- **Delivery Pack:** `AIRLOCK-P03`
+- **Commit:** this commit (locate with `git log -S 'AIRLOCK-P03-C03' --oneline -- docs/ledger/2026-08-05-delivery-packs.md`)
+- **Candidate:** base `819ce33` + product-diff hash `439b8b0324747e831282e6554cb62238a2931797` (`git hash-object --stdin`, excluding administrative plan/ledger diff)
+- **Owned:** Claude orchestrator/external runner, deterministic launcher/tests, root/adapter docs, conventions, manifests, P03 design/plan/ledger
+- **Touched:** `.claude-plugin/*`, `agents/orchestrator.md`, `agents/external-runner.md`, `scripts/run-external-agent*.mjs`, root/adapter docs, conventions, P03 design/plan, and this ledger
+- **External handoff audit:** source smoke used Fable/high → Haiku/medium → `airlock-worker` on `openai/gpt-5.4-mini`/none through direct-exe-npm; read 1/1; effective identity, terminal stop, headings, session and exact cleanup passed
+- **Evidence:** `AIRLOCK-G16`, `AIRLOCK-G18`, 21 Node tests, strict plugin validation, source bridge smoke, and `git diff --cached --check` passed
+- **Artifacts / cleanup:** all debug/smoke sessions, manifests, NDJSON, and residual `.err` removed by exact ID/path; no task-owned process remains
+- **Scope audit:** passed against amended C03 contract
+- **Pack lifecycle after Crossing:** candidate
+- **Deviations:** prompt-only bridge replaced by user-approved dependency-free launcher after `AIRLOCK-D01`; C03 scope added launcher/tests and adapter documentation; interrupted-bridge orphan risk remains documented under the accepted user-account threat model
+
 ## Open items
 
 | # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
@@ -257,3 +273,4 @@
 
 | Debug ID | Pack ID | Candidate / Crossing | Failed gate or check | Reproduction / root cause | Gates to rerun | State / repair pack |
 |---|---|---|---|---|---|---|
+| `AIRLOCK-D01` | `AIRLOCK-P03` | C03 working candidate after `819ce33` | source-plugin no-write external-route smoke | Prompt-only bridge was nondeterministic. Approved fix moved command construction, timeout, parsing, identity proof, and cleanup into a dependency-free launcher; foreground source smoke then passed Fable→Haiku→OpenCode with exact cleanup. | `AIRLOCK-G16`, `AIRLOCK-G18`; source smoke task 30 | resolved in C03; `AIRLOCK-E15` |

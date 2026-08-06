@@ -14,20 +14,28 @@ opencode debug config
 
 This proves only the installed agent's static resolution. It does not prove the merged per-run policy. Project and inline configuration can affect resolution, so repeat the static preflight for each target checkout and abort on an unexpected override or fallback warning. Separately, the approved denied-operation probe must prove that the exact per-run policy overrides ambient permissions.
 
-### Closed foreground invocation
+### Deterministic launcher bridge
 
-Every dispatch passes its approved model, variant, directory, and JSON format explicitly:
+Node.js is required. The Claude bridge never constructs an OpenCode command, policy, prompt, retry, cleanup operation, or process termination itself. It invokes the bundled launcher exactly once:
 
 ```text
-opencode --pure run --agent airlock-worker \
-  --model <provider/model> --variant <variant> \
-  --dir <absolute-target-directory> --format json \
-  <complete-closed-dispatch-prompt>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs" \
+  --manifest <absolute-manifest.json> --sha256 <lowercase-hex>
 ```
 
-Never add `--auto`. The caller enforces the approved foreground timeout, serializes file-writing runs per checkout, and performs no file or Git operation in that checkout until the worker returns. Read-only runs may overlap only when they cannot contend for mutable state.
+The orchestrator creates the secret-free manifest, hashes its exact bytes, records it as task-owned temporary state, and supplies the path/hash plus approved route reference to the bridge. The launcher validates the hash and emits one JSON summary with schema `airlock.external-agent-result/v1`, including status/classification/action, selected/effective route, session, process, event evidence, policy, and cleanup facts. A bridge reports `done` only for a launcher `done`; it propagates a blocked classification and exact action without retrying.
 
-For each process, set non-secret `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` values rather than relying on ambient defaults. The successful inline-config probe used exactly these non-secret keys: `$schema`, `autoupdate`, `snapshot`, `share`, `default_agent`, `model`, `small_model`, `subagent_depth`, `instructions`, `lsp`, `formatter`, and `compaction`. Route-specific model values must agree with the explicit CLI route. That successful object did not include an `mcp` key; `--pure` plus the total tool policy denies unapproved plugin, MCP, and custom tools.
+The manifest schema is `airlock.external-agent/v1` and has exactly `schema`, `runtime`, `packId`, `crossingId`, `route`, `prompt`, `opencode`, `timeoutMs`, `evidencePath`, `expected`, `cleanup`, `retention`, and `policy`. Its nested route, expected, cleanup, retention, and policy fields are the approved launch contract; unknown fields, secrets, or a non-lowercase SHA-256 fail closed. The launcher owns foreground invocation, evidence parsing, effective-identity export, exact session/file cleanup, and absence verification.
+
+The launcher enforces the approved foreground timeout, serializes file-writing runs per checkout, and leaves the orchestrator idle in that checkout until return. Read-only runs may overlap only when they cannot contend for mutable state. On Windows it resolves only a direct `opencode.exe`, including the supported npm-installed executable; PowerShell/npm command shims fail closed.
+
+Run its dependency-free checks with:
+
+```text
+node --test scripts/run-external-agent.test.mjs
+```
+
+For each process, the launcher sets non-secret `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` values from the manifest rather than relying on ambient defaults. The successful inline-config probe used exactly these non-secret keys: `$schema`, `autoupdate`, `snapshot`, `share`, `default_agent`, `model`, `small_model`, `subagent_depth`, `instructions`, `lsp`, `formatter`, and `compaction`. Route-specific model values must agree with the manifest route. That successful object did not include an `mcp` key; `--pure` plus the total tool policy denies unapproved plugin, MCP, and custom tools.
 
 Construct the last-match-wins permission policy in this order:
 
@@ -35,37 +43,15 @@ Construct the last-match-wins permission policy in this order:
 2. Inside each granular tool policy, put `"*": "deny"` first, then exact approved allows, then explicit high-risk denies after any overlapping allows. High-risk final denies cover environment/auth/credential reads, configuration or unowned edits, undeclared external directories, arbitrary shell/network operations, and push/publish/history rewriting.
 3. Keep the agent's static `task: deny` and `question: deny` as the final per-agent rules. They are the only static containment; edit, shell, fetch, external-directory, and every other tool restriction must come from the total per-run policy.
 
-Record the full config and permission JSON, or immutable sources plus content hashes, as the orchestrator-owned policy identity. The dispatch contains that immutable identity and a reference to the completed denied-operation precedence proof; the worker confirms their presence rather than re-proving precedence. Disable interactive Git credential prompts and inherited SSH-agent access for the child process. The exact Bash allowlist and worker contract still deny every remote operation.
+Record the full config and permission JSON, or immutable sources plus content hashes, as the orchestrator-owned policy identity. The manifest contains that immutable identity and a reference to the completed denied-operation precedence proof; the worker confirms their presence rather than re-proving precedence. The launcher disables interactive Git credential prompts and inherited SSH-agent access for the child process. The exact Bash allowlist and worker contract still deny every remote operation.
 
-The prompt must contain the approved Pack/Crossing IDs, selected and expected effective route, exact file contract and STOP rule, approved commands, timeout, commit permission, immutable policy identity plus precedence-proof reference, and artifact/session policy. The worker refuses an incomplete dispatch before tool use.
+The manifest prompt must contain the approved Pack/Crossing IDs, selected and expected effective route, exact file contract and STOP rule, approved commands, timeout, commit permission, immutable policy identity plus precedence-proof reference, and artifact/session policy. The worker refuses an incomplete dispatch before tool use.
 
 ### JSON and session lifecycle
 
-`--format json` emits newline-delimited JSON. The C01 probe observed top-level `type`, `timestamp`, and `sessionID` fields plus event-specific `part` data, with `step_start`, `tool_use`, `step_finish`, and `text` event types. It observed tool and terminal-state data under `tool_use.part`, return text under `text.part.text`, and reason/cost/token data under `step_finish.part` when supplied. Treat this as an observed sub-schema, not a stable contract: parse each line defensively, validate fields before use, tolerate additive fields, and classify missing required identity/completion data as indeterminate. An `error` event or non-zero process exit remains a failure; never infer completion from a text event alone. Record the session ID, completion classification, selected/effective agent/model/variant, policy identity/proof reference, and evidence summary.
+`--format json` emits newline-delimited JSON. The C01 probe observed top-level `type`, `timestamp`, and `sessionID` fields plus event-specific `part` data, with `step_start`, `tool_use`, `step_finish`, and `text` event types. It observed tool and terminal-state data under `tool_use.part`, return text under `text.part.text`, and reason/cost/token data under `step_finish.part` when supplied. The launcher parses this observed sub-schema defensively, validates required identity/completion evidence, and reports its single result summary; an error event, non-zero exit, missing terminal stop, or text-only result is blocked.
 
-Resume only by exact session ID after re-verifying branch, parent, index, full status baseline, and attributable delta. A plain continuation must use the same approved model, variant, and route as the original run and must reapply the complete policy:
-
-```text
-opencode --pure run --session <session-id> \
-  --agent airlock-worker --model <same-provider/model> --variant <same-variant> \
-  --dir <absolute-target-directory> --format json <resume-prompt>
-```
-
-Current evidence does not prove that resume flags override stored session metadata. Independently verify the effective session metadata before allowing work. If any selected route field changes, fork the session and independently verify the fork's effective metadata before work:
-
-```text
-opencode --pure run --session <session-id> --fork \
-  --agent airlock-worker --model <approved-provider/model> --variant <approved-variant> \
-  --dir <absolute-target-directory> --format json <fork-prompt>
-```
-
-After a session is accepted or abandoned and any approved sanitized export is complete, clean it separately by exact ID:
-
-```text
-opencode session delete <exact-session-id>
-```
-
-Never use an ambiguous “last session” for cleanup.
+The launcher owns exact session export, deletion, and absence verification according to the manifest. The model bridge never resumes, forks, deletes, or otherwise manipulates a session. The orchestrator records the returned exact session and cleanup facts, then permits a new manifest only after its checkout audit; never use an ambiguous “last session”.
 
 ### Candidate commit and audit
 

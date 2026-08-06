@@ -15,6 +15,8 @@ The approved design is `docs/specs/2026-08-06-external-agent-delegation-design.m
 - `skills/ship/LEDGER.template.md`
 - `agents/orchestrator.md`
 - `agents/external-runner.md` (new)
+- `scripts/run-external-agent.mjs` (new)
+- `scripts/run-external-agent.test.mjs` (new)
 - `adapters/opencode/agents/airlock-worker.md` (new)
 - `adapters/opencode/README.md`
 - `README.md`
@@ -57,7 +59,7 @@ If implementation or a gate needs an unowned path, stop and request a scope amen
 |---|---|---|---|---|
 | `AIRLOCK-P03-C01` | 1–17 | canonical plan/ship skills and ledger template define safe external dispatch and candidate handoff | feasibility probe | canonical skills/template + process artifacts |
 | `AIRLOCK-P03-C02` | 11–17 | targetable OpenCode worker source and global copy resolve with closed headless behavior | C01 | OpenCode adapter agent/README + global worker |
-| `AIRLOCK-P03-C03` | 18–25 | Claude bridge delegates approved routes; 1.3.0 source validates with ten agents | C02 | Claude agents, README/conventions, manifests |
+| `AIRLOCK-P03-C03` | 25–32 | Claude bridge delegates approved routes through a deterministic launcher; 1.3.0 source validates with ten agents | C02 | Claude agents, launcher/tests, root/adapter README, conventions, manifests |
 | `AIRLOCK-P03-C04` | 26–34 | source published, installed, smoke-tested end to end, and pack accepted | C03 | plan/ledger + external installation |
 
 ## Tasks
@@ -97,14 +99,17 @@ If implementation or a gate needs an unowned path, stop and request a scope amen
 
 ### Crossing 3 - Claude Bridge and Release Source
 
-- [ ] 25. Change `agents/orchestrator.md` to `model: inherit` and require only approved external routes.
-- [ ] 26. Add Haiku `agents/external-runner.md` with shell/read tools, no direct edit/write tools, foreground JSON invocation, bounded return, and no ledger ownership.
-- [ ] 27. Document external-runtime setup, routing, worker commit ownership, and security boundary in README and project conventions.
-- [ ] 28. Bump plugin and marketplace manifests to 1.3.0.
-- [ ] 29. Run strict plugin validation and confirm five skills plus ten agents.
-- [ ] 30. Smoke the source plugin with user-selected Claude orchestrator and a no-write external route.
-- [ ] 31. Obtain independent GLM review and DeepSeek verification of the complete frozen source candidate.
-- [ ] 32. Update ledger evidence/checkpoint, stage exact C03 paths, audit cached names, and ship/push the source candidate.
+- [x] 25. Change `agents/orchestrator.md` to `model: inherit` and require only approved external routes.
+- [x] 26. Add Haiku `agents/external-runner.md` with shell/read tools, no direct edit/write tools, foreground JSON invocation, bounded return, and no ledger ownership.
+- [x] 26a. Add dependency-free `scripts/run-external-agent.mjs`; validate a hashed manifest, invoke OpenCode without model-owned command construction, enforce timeout/result checks, and clean exact session/temp state.
+- [x] 26b. Add Node built-in tests for success, blocked worker, malformed manifest, timeout, and cleanup failure.
+- [x] 27. Document external-runtime setup, routing, worker commit ownership, and security boundary in README and project conventions.
+- [x] 27a. Update the OpenCode adapter documentation for the hashed-manifest launcher, direct executable requirement, and structured result contract.
+- [x] 28. Bump plugin and marketplace manifests to 1.3.0.
+- [x] 29. Run strict plugin validation and confirm five skills plus ten agents.
+- [x] 30. Smoke the source plugin with user-selected Claude orchestrator and a no-write external route.
+- [x] 31. Obtain independent GLM review and DeepSeek verification of the complete frozen source candidate.
+- [x] 32. Update ledger evidence/checkpoint, stage exact C03 paths, audit cached names, and ship/push the source candidate.
 
 ### Crossing 4 - Publish, Activate, and Close
 
@@ -120,7 +125,8 @@ If implementation or a gate needs an unowned path, stop and request a scope amen
 | P03 feasibility 1–10 | Critical | investigator/verifier | subagent | `code-critical` | Sol max | A | yes | disposable temp paths only |
 | P03-C01 11–17 | Critical | implementer | subagent | `code-critical` | Sol max | B | yes | canonical skills and ledger template |
 | P03-C02 18–24 | Critical | implementer | subagent | `code-critical` | Sol max | C | yes | OpenCode adapter/global worker |
-| P03-C03 25–30 | Standard | implementer | subagent | `code-standard` | Terra high | D | yes | Claude agents/docs/manifests |
+| P03-C03 25–30 | Standard | implementer | subagent | `code-standard` | Terra high | D1 | yes | Claude agents/docs/manifests |
+| P03-C03 26a–26b | Critical | implementer | subagent | `code-critical` | Sol max | D2 after D1 | yes | deterministic launcher/tests |
 | P03-C01…C03 review | Critical | independent reviewer | subagent | `review-glm` | GLM high | after each | yes | read-only candidate |
 | P03-C03 verification | Standard | verifier | subagent | `verify` | DeepSeek high | E | yes | read-only frozen candidate |
 | P03-C04 33–36 | Critical | orchestrator | inline | active orchestrator | Sol | F | yes | process artifacts + external activation |
@@ -134,7 +140,7 @@ All file-writing groups are serialized. The external runtime feature itself perm
 | `AIRLOCK-G13` | inline config and permission precedence | code-critical + verifier | disposable OpenCode run | total policy overrides ambient allow; denied and allowed probes behave exactly |
 | `AIRLOCK-G14` | canonical external-runtime consistency | review-glm | C01 diff | no contradictory routing, ownership, resume, commit, or cleanup semantics |
 | `AIRLOCK-G15` | OpenCode worker resolution and lifecycle | verifier | config resolution + disposable run | primary worker, approved model/variant, one commit, exact audit |
-| `AIRLOCK-G16` | Claude plugin validation | verifier | `claude plugin validate . --strict` + details | valid 1.3.0 source with five skills and ten agents |
+| `AIRLOCK-G16` | Claude plugin and launcher validation | verifier | Node built-in tests + `claude plugin validate . --strict` + details | launcher lifecycle tests pass; valid 1.3.0 source with five skills and ten agents |
 | `AIRLOCK-G17` | installed end-to-end dispatch | orchestrator + verifier | installed Claude → OpenCode disposable repo | scoped product commit and Claude audit succeed |
 | `AIRLOCK-G18` | independent security/process review | review-glm | frozen full diff and external config | no blocking findings |
 | `AIRLOCK-G19` | cleanup | verifier | exact paths/session IDs/processes | all task-owned temporary state removed; retained evidence referenced |

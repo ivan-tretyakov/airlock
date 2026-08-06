@@ -71,7 +71,7 @@ Nothing was disobeyed. The **approach choice was never signed off** and the **bl
 
 Then in any project, the skills are available as `/airlock:brainstorm`, `/airlock:plan`, `/airlock:ship`, `/airlock:review`, `/airlock:debug` — and Claude will auto-invoke them when a request matches.
 
-Airlock also ships Claude Code role agents. `airlock:orchestrator` defaults to Claude Opus 5 at high effort, executes the approved pack routing, and can override a specialist's default model per invocation when the plan records that mapping. To make it the main Claude agent everywhere:
+Airlock also ships Claude Code role agents. `airlock:orchestrator` inherits the user's expensive Claude selection (for example, Opus or Fable) at high effort and executes the approved pack routing. To make it the main Claude agent everywhere:
 
 ```json
 {
@@ -84,6 +84,20 @@ Airlock also ships Claude Code role agents. `airlock:orchestrator` defaults to C
 The specialist defaults are Haiku for Light work and investigation/verification, Sonnet for Standard and visual work, and Opus for Complex, Critical, and independent review. Independent context is mandatory; different model family is preferred when the host supports it. Claude-native review must disclose when only same-family models are available.
 
 The `agent` setting resolves only after a release containing `airlock:orchestrator` is installed. During local development, launch with `claude --plugin-dir C:/path/to/airlock --agent airlock:orchestrator`; do not point normal sessions at an agent that exists only in unpublished source.
+
+### Approved external runtimes
+
+An approved plan may route a task to an external runtime only when it names the runtime, agent, model, variant, target directory, file contract, commands, timeout, permission policy, commit permission, and session/cleanup policy. The inherited Claude orchestrator writes one secret-free, hashed route manifest and delegates it to the medium-effort Haiku `external-runner`; it does not shell out directly.
+
+Airlock 1.3.0 implements a plan-approved multimodel [OpenCode worker](adapters/opencode/README.md) path. It requires Node.js, Claude Code, and the OpenCode CLI with the selected provider/model available. The bridge calls `${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs` once with the manifest's exact lowercase SHA-256; the launcher emits one JSON result summary. Follow the adapter's installation and invocation contract rather than copying its low-level policy recipe into project instructions.
+
+The model bridge no longer owns OpenCode commands, policy, retries, cleanup, or process termination; the deterministic launcher does. On Windows it requires a direct `opencode.exe` (including the supported npm binary); a PowerShell shim fails closed. The external process still runs under the user's account, so the launcher policy and post-return audit are safeguards against ordinary scope drift, not hostile-code isolation. Only the Claude orchestrator may own process artifacts, create a ledger Crossing, push, or publish.
+
+External writers are serialized per active checkout. Read-only external runs may be parallel only when they cannot contend for mutable state. A permitted external worker can create one scoped **product candidate** commit; it is not an Airlock Crossing. The orchestrator then audits its parent, paths, index, status delta, and effective route before recording the separate ledger Crossing.
+
+Each launcher result returns its exact session ID, completion classification, route, evidence, and owned artifacts. Record active sessions in the ledger Resume checkpoint. The launcher performs manifest-approved exact cleanup; the model bridge never resumes, retries, deletes, or terminates runtime state. Required capture and cleanup must be verified before the bridge reports `done`; unknown state is left untouched.
+
+The launcher has dependency-free tests: `node --test scripts/run-external-agent.test.mjs`.
 
 ### Local development
 
@@ -128,6 +142,8 @@ The skills are intentionally engine-, language-, model-, and host-agnostic. Supp
 - browser/MCP availability, visual specs, screenshot homes, viewports, live targets, and cleanup policy
 - scratch/evidence homes and exact-path retention/cleanup rules
 - host role/model mapping and independent-review policy
+- allowed external runtimes plus their agent/model/variant mapping, timeout, commit permission, and active-branch writer policy
+- approved external temporary, session, and retained-evidence homes
 - architecture invariants (the few load-bearing files an agent must not touch)
 - protected local state to back up before mutating runs
 - branch/push policy and commit conventions

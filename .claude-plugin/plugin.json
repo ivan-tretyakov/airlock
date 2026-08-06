@@ -1,7 +1,7 @@
 {
   "name": "airlock",
   "description": "A lightweight structured development flow: approved scope → routed Delivery Packs and buildable Crossings → exact-candidate evidence → triaged review, plus systematic debug.",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "author": {
     "name": "Ivan Tretyakov"
   },

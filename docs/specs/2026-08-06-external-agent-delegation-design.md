@@ -10,8 +10,8 @@ The Claude orchestrator remains responsible for design, routing, scope, audit, l
 
 - **Deliverable:** Airlock 1.3.0 external-runtime delegation, an OpenCode worker adapter, and user-scoped activation.
 - **Integration stance:** integrated at canonical plan/ship dispatch, Claude orchestration, and the OpenCode CLI adapter.
-- **Extend or fresh:** extend existing routing, evidence, checkpoint, and cleanup semantics; add one Claude bridge agent and one OpenCode worker agent. Do not add an MCP/ACP service.
-- **May touch:** `skills/plan/SKILL.md`, `skills/ship/SKILL.md`, `skills/ship/LEDGER.template.md`, `agents/orchestrator.md`, `agents/external-runner.md`, `adapters/opencode/agents/airlock-worker.md`, `adapters/opencode/README.md`, `README.md`, `PROJECT-CONVENTIONS.template.md`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, this design, its plan, the delivery ledger, and `~/.config/opencode/agents/airlock-worker.md`.
+- **Extend or fresh:** extend existing routing, evidence, checkpoint, and cleanup semantics; add one Claude bridge agent, one OpenCode worker agent, and one deterministic launcher with built-in tests. Do not add an MCP/ACP service.
+- **May touch:** `skills/plan/SKILL.md`, `skills/ship/SKILL.md`, `skills/ship/LEDGER.template.md`, `agents/orchestrator.md`, `agents/external-runner.md`, `scripts/run-external-agent.mjs`, `scripts/run-external-agent.test.mjs`, `adapters/opencode/agents/airlock-worker.md`, `adapters/opencode/README.md`, `README.md`, `PROJECT-CONVENTIONS.template.md`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, this design, its plan, the delivery ledger, and `~/.config/opencode/agents/airlock-worker.md`.
 - **Must not touch:** existing specialist agents, `~/.config/opencode/opencode.jsonc`, credentials/auth files, plugin caches, application repositories, historical specs/plans, or canonical brainstorm/review/debug semantics.
 - **STOP rule:** any additional source or configuration path requires an approved scope amendment before editing.
 
@@ -19,7 +19,9 @@ The Claude orchestrator remains responsible for design, routing, scope, audit, l
 
 ### Dedicated bridge, not direct orchestration or MCP
 
-A new Claude plugin subagent, `external-runner`, invokes the external runtime in a separate cheap Claude context. This keeps event streams, permission setup, and session handling out of the expensive orchestrator context. Direct shell invocation by the orchestrator would duplicate this machinery; a custom MCP/ACP bridge would add maintenance without improving the foreground task flow.
+A new Claude plugin subagent, `external-runner`, invokes a bundled deterministic launcher in a separate cheap Claude context. The orchestrator writes one exact hashed dispatch manifest before delegation; the launcher validates it, invokes the external runtime, parses events, enforces timeout/result checks, and cleans exact session/temp state. Haiku relays the structured result rather than assembling shell/process lifecycle itself. This keeps event streams out of the expensive orchestrator context. Direct model-owned shell orchestration proved nondeterministic in `AIRLOCK-D01`; a custom MCP/ACP bridge would add maintenance without improving the foreground task flow.
+
+The launcher is a dependency-free Node `.mjs` program addressed through `${CLAUDE_PLUGIN_ROOT}` and tested with Node's built-in test runner. Node availability is a documented OpenCode bridge prerequisite. A malformed manifest fails closed before runtime launch.
 
 ### User-selected Claude orchestrator model
 
@@ -66,7 +68,7 @@ The first execution step must empirically prove how inline OpenCode configuratio
 
 ### Session, resume, evidence, and cleanup
 
-The bridge parses OpenCode's JSON event stream and returns the session ID, effective route, completion state, evidence summary, and exact artifacts/processes. The orchestrator stores active session IDs in the ledger Resume checkpoint.
+The deterministic launcher parses OpenCode's JSON event stream and returns the session ID, effective route, worker state, completion state, evidence summary, and exact artifacts/processes. The bridge relays that bounded result; the orchestrator stores active session IDs in the ledger Resume checkpoint.
 
 Failed or interrupted sessions may be resumed only against a verified checkout state, using a fork when preserving the original failed session matters. Accepted or abandoned sessions are deleted by exact ID after any required sanitized export. Temporary repos, permission/config files, logs, and processes are removed by exact path or ID; unknown or pre-existing state is never cleaned.
 
