@@ -3,9 +3,14 @@ import { constants as fsConstants } from "node:fs";
 import {
   access as nodeAccess,
   lstat as nodeLstat,
+  mkdir as nodeMkdir,
   open as nodeOpen,
+  readdir as nodeReaddir,
   readFile as nodeReadFile,
+  realpath as nodeRealpath,
+  rm as nodeRm,
   unlink as nodeUnlink,
+  writeFile as nodeWriteFile,
 } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
@@ -13,13 +18,19 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { TextDecoder } from "node:util";
 
-export const MANIFEST_SCHEMA_ID = "airlock.external-agent/v1";
+export const LEGACY_MANIFEST_SCHEMA_ID = "airlock.external-agent/v1";
+export const MANIFEST_SCHEMA_ID = "airlock.external-agent/v2";
 export const RESULT_SCHEMA_ID = "airlock.external-agent-result/v1";
 
 export const OPENCODE_INVOCATION_KINDS = Object.freeze([
   "direct-posix",
   "direct-exe-path",
   "direct-exe-npm",
+]);
+
+export const GIT_INVOCATION_KINDS = Object.freeze([
+  "direct-posix-path",
+  "direct-exe-path",
 ]);
 
 export const AIRLOCK_HEADINGS = Object.freeze([
@@ -30,8 +41,8 @@ export const AIRLOCK_HEADINGS = Object.freeze([
   "Action needed",
 ]);
 
-export const MANIFEST_SCHEMA = deepFreeze({
-  id: MANIFEST_SCHEMA_ID,
+export const LEGACY_MANIFEST_SCHEMA = deepFreeze({
+  id: LEGACY_MANIFEST_SCHEMA_ID,
   keys: {
     root: [
       "schema",
@@ -70,11 +81,126 @@ export const MANIFEST_SCHEMA = deepFreeze({
   },
 });
 
+export const MANIFEST_SCHEMA = deepFreeze({
+  id: MANIFEST_SCHEMA_ID,
+  keys: {
+    root: [
+      "schema",
+      "runtime",
+      "packId",
+      "crossingId",
+      "route",
+      "prompt",
+      "opencode",
+      "timeoutMs",
+      "baseline",
+      "ownedPaths",
+      "validations",
+      "commit",
+      "artifacts",
+      "expected",
+      "cleanup",
+      "retention",
+      "policy",
+    ],
+    route: ["agent", "model", "variant", "targetDirectory", "branch"],
+    opencode: ["config", "permission"],
+    baseline: [
+      "branch",
+      "head",
+      "indexEmpty",
+      "status",
+      "ownedPathHashes",
+      "dirtyPathHashes",
+    ],
+    pathHash: ["path", "state", "sha256"],
+    statusOrdinary: [
+      "kind",
+      "xy",
+      "submodule",
+      "headMode",
+      "indexMode",
+      "worktreeMode",
+      "headOid",
+      "indexOid",
+      "path",
+    ],
+    statusRenamed: [
+      "kind",
+      "xy",
+      "submodule",
+      "headMode",
+      "indexMode",
+      "worktreeMode",
+      "headOid",
+      "indexOid",
+      "score",
+      "path",
+      "originalPath",
+    ],
+    statusUnmerged: [
+      "kind",
+      "xy",
+      "submodule",
+      "stage1Mode",
+      "stage2Mode",
+      "stage3Mode",
+      "worktreeMode",
+      "stage1Oid",
+      "stage2Oid",
+      "stage3Oid",
+      "path",
+    ],
+    statusUntracked: ["kind", "path"],
+    validation: [
+      "purpose",
+      "executable",
+      "args",
+      "workingDirectory",
+      "timeoutMs",
+      "maxStdoutBytes",
+      "maxStderrBytes",
+      "expectedExitCode",
+    ],
+    commit: [
+      "allowed",
+      "crossingId",
+      "message",
+      "messageSha256",
+      "candidatePaths",
+    ],
+    artifacts: [
+      "manifestPath",
+      "temporaryDirectory",
+      "evidencePath",
+      "messagePath",
+      "hooksDirectory",
+    ],
+    expected: ["workerStatus", "headings", "mutations", "effectiveIdentity"],
+    mutation: ["tool", "input", "minimum"],
+    effectiveIdentity: ["provider", "model"],
+    cleanup: ["session", "manifest", "temporaryDirectory", "verifyAbsence"],
+    retention: ["session", "manifest", "temporaryDirectory", "transcript"],
+    policy: ["identity", "proof"],
+  },
+  enums: {
+    runtime: ["opencode"],
+    workerStatus: ["done", "partial", "blocked"],
+    pathState: ["file", "absent", "symlink"],
+    mutationTool: ["edit", "write"],
+    retention: ["temporary", "retained"],
+    transcriptRetention: ["none"],
+  },
+});
+
 const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
 const MAX_EVIDENCE_BYTES = 64 * 1024 * 1024;
 const MAX_CAPTURED_STDOUT_BYTES = 64 * 1024 * 1024;
 const MAX_STDERR_BYTES = 64 * 1024;
 const MAX_PROMPT_CHARACTERS = 24_000;
+const MAX_COMMIT_MESSAGE_BYTES = 64 * 1024;
+const MAX_VALIDATION_OUTPUT_BYTES = 16 * 1024 * 1024;
+const MAX_VALIDATIONS = 100;
 const PROCESS_EXIT_GRACE_MS = 5_000;
 const TREE_TERMINATION_GRACE_MS = 750;
 const INVALID_ORIGIN_PUSH_URL =
@@ -261,11 +387,574 @@ function assertSafeString(value, code, maximum = 4_096) {
   }
 }
 
-export function validateManifest(value, { manifestPath } = {}) {
+function hasAllowLeaf(value) {
+  if (value === "allow") return true;
+  if (!isRecord(value)) return false;
+  return Object.values(value).some(hasAllowLeaf);
+}
+
+function pathImplementationFor(value) {
+  return path.win32.isAbsolute(value) ? path.win32 : path.posix;
+}
+
+function canonicalAbsolutePath(value) {
+  const implementation = pathImplementationFor(value);
+  const resolved = implementation.resolve(value);
+  return implementation === path.win32 ? resolved.toLowerCase() : resolved;
+}
+
+function pathsEqual(left, right) {
+  return canonicalAbsolutePath(left) === canonicalAbsolutePath(right);
+}
+
+function pathIsInside(parent, candidate, { allowEqual = false } = {}) {
+  if (!isAbsolutePath(parent) || !isAbsolutePath(candidate)) return false;
+  const implementation = pathImplementationFor(parent);
+  if (implementation !== pathImplementationFor(candidate)) return false;
+  const relative = implementation.relative(
+    implementation.resolve(parent),
+    implementation.resolve(candidate),
+  );
+  if (relative === "") return allowEqual;
+  return (
+    relative !== ".." &&
+    !relative.startsWith(`..${implementation.sep}`) &&
+    !implementation.isAbsolute(relative)
+  );
+}
+
+function isExactRelativePath(value, { allowDot = false } = {}) {
+  if (value === ".") return allowDot;
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 4_096 &&
+    !value.includes("\0") &&
+    !value.includes("\\") &&
+    !/[\x00-\x1f\x7f*?[\]{}]/.test(value) &&
+    !path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value &&
+    !value.endsWith("/") &&
+    value.split("/").every((component) => component !== "." && component !== "..")
+  );
+}
+
+function compareStrings(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function isCanonicalRelativePathList(value, { allowEmpty = false } = {}) {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) return false;
+  if (value.some((item) => !isExactRelativePath(item))) return false;
+  const folded = new Set();
+  for (const item of value) {
+    const key = item.toLowerCase();
+    if (folded.has(key)) return false;
+    folded.add(key);
+  }
+  return value.every(
+    (item, index) => index === 0 || compareStrings(value[index - 1], item) < 0,
+  );
+}
+
+function assertCommonManifestFields(value) {
+  if (value.runtime !== "opencode") fail("manifest_runtime_unknown");
+  if (!PACK_ID.test(value.packId)) fail("manifest_ids_invalid");
+  if (
+    !PACK_ID.test(value.crossingId) ||
+    !new RegExp(
+      `^${value.packId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-C\\d+$`,
+    ).test(value.crossingId)
+  ) {
+    fail("manifest_ids_invalid");
+  }
+
+  exactKeys(value.route, MANIFEST_SCHEMA.keys.route);
+  for (const field of ["agent", "model", "variant"]) {
+    assertSafeString(value.route[field], "manifest_route_invalid", 256);
+    if (!SAFE_IDENTIFIER.test(value.route[field])) fail("manifest_route_invalid");
+  }
+  if (!isAbsolutePath(value.route.targetDirectory)) fail("manifest_route_invalid");
+  if (!SAFE_BRANCH.test(value.route.branch)) fail("manifest_route_invalid");
+
+  assertSafeString(value.prompt, "manifest_prompt_invalid", MAX_PROMPT_CHARACTERS);
+  if (value.prompt.trimStart().startsWith("-")) fail("manifest_prompt_invalid");
+  if (
+    !Number.isSafeInteger(value.timeoutMs) ||
+    value.timeoutMs < 1 ||
+    value.timeoutMs > 86_400_000
+  ) {
+    fail("manifest_timeout_invalid");
+  }
+}
+
+function permissionEntries(value, code = "manifest_permission_not_total") {
+  if (value === undefined || value === "deny") return [];
+  if (!isRecord(value) || Object.keys(value)[0] !== "*" || value["*"] !== "deny") {
+    fail(code);
+  }
+  const entries = Object.entries(value).slice(1);
+  if (
+    entries.some(
+      ([selector, decision]) =>
+        typeof selector !== "string" ||
+        selector.length === 0 ||
+        (decision !== "allow" && decision !== "deny"),
+    )
+  ) {
+    fail(code);
+  }
+  return entries;
+}
+
+function validateWorkerPermissions(value) {
+  const permission = value.opencode.permission;
+  if (permission["*"] !== "deny") fail("manifest_permission_not_total");
+  if (!isDenyOnly(permission.task) || !isDenyOnly(permission.question)) {
+    fail("manifest_permission_not_total");
+  }
+
+  const allowedTools = new Set(["*", "read", "edit", "bash", "task", "question"]);
+  for (const [tool, policy] of Object.entries(permission)) {
+    if (!allowedTools.has(tool) && hasAllowLeaf(policy)) {
+      fail("manifest_permission_not_total");
+    }
+  }
+
+  const expectedOwned = value.ownedPaths.map((relativePath) =>
+    canonicalAbsolutePath(
+      pathImplementationFor(value.route.targetDirectory).join(
+        value.route.targetDirectory,
+        ...relativePath.split("/"),
+      ),
+    ),
+  );
+  const readAllows = permissionEntries(permission.read)
+    .filter(([, decision]) => decision === "allow")
+    .map(([selector]) => selector);
+  const editAllows = permissionEntries(permission.edit)
+    .filter(([, decision]) => decision === "allow")
+    .map(([selector]) => selector);
+
+  for (const selector of [...readAllows, ...editAllows]) {
+    if (
+      !isAbsolutePath(selector) ||
+      !pathIsInside(value.route.targetDirectory, selector) ||
+      /(?:^|[\\/])(?:\.env[^\\/]*|[^\\/]*(?:credential|secret|token|password)[^\\/]*)$/i.test(
+        selector,
+      )
+    ) {
+      fail("manifest_permission_not_total");
+    }
+  }
+  const canonicalReads = new Set(readAllows.map(canonicalAbsolutePath));
+  const canonicalEdits = editAllows.map(canonicalAbsolutePath).sort(compareStrings);
+  if (expectedOwned.some((ownedPath) => !canonicalReads.has(ownedPath))) {
+    fail("manifest_permission_not_total");
+  }
+  if (
+    canonicalEdits.length !== expectedOwned.length ||
+    canonicalEdits.some(
+      (candidate, index) => candidate !== [...expectedOwned].sort(compareStrings)[index],
+    )
+  ) {
+    fail("manifest_permission_not_total");
+  }
+
+  const readOnlyGitCommands = new Set([
+    "branch",
+    "cat-file",
+    "check-attr",
+    "diff",
+    "diff-tree",
+    "log",
+    "ls-files",
+    "rev-list",
+    "rev-parse",
+    "show",
+    "status",
+  ]);
+  for (const [command, decision] of permissionEntries(permission.bash)) {
+    if (decision !== "allow") continue;
+    if (
+      command.length > 4_096 ||
+      /[\r\n;&|><`$()]/.test(command) ||
+      /[*?\[\]{}]/.test(command)
+    ) {
+      fail("manifest_permission_not_total");
+    }
+    const gitCommands = command.matchAll(
+      /(?:^|\s)(?:"[^"\r\n]*[/\\])?git(?:\.exe)?"?\s+([^\s"']+)/gi,
+    );
+    for (const match of gitCommands) {
+      if (!readOnlyGitCommands.has(match[1].toLowerCase())) {
+        fail("manifest_permission_git_write");
+      }
+    }
+  }
+}
+
+function validatePathHash(value, expectedPath, code) {
+  exactKeys(value, MANIFEST_SCHEMA.keys.pathHash);
+  if (
+    value.path !== expectedPath ||
+    !MANIFEST_SCHEMA.enums.pathState.includes(value.state) ||
+    (value.state === "absent"
+      ? value.sha256 !== null
+      : !LOWERCASE_SHA256.test(value.sha256))
+  ) {
+    fail(code);
+  }
+}
+
+function validateStatusEntry(entry) {
+  if (!isRecord(entry)) fail("manifest_baseline_invalid");
+  const mode = /^[0-7]{6}$/;
+  const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
+  if (entry.kind === "ordinary") {
+    exactKeys(entry, MANIFEST_SCHEMA.keys.statusOrdinary);
+    if (
+      !/^[.MADRCU]{2}$/.test(entry.xy) ||
+      !/^[NS][.SCU]{3}$/.test(entry.submodule) ||
+      !mode.test(entry.headMode) ||
+      !mode.test(entry.indexMode) ||
+      !mode.test(entry.worktreeMode) ||
+      !oid.test(entry.headOid) ||
+      !oid.test(entry.indexOid) ||
+      !isExactRelativePath(entry.path)
+    ) {
+      fail("manifest_baseline_invalid");
+    }
+    return [entry.path];
+  }
+  if (entry.kind === "renamed") {
+    exactKeys(entry, MANIFEST_SCHEMA.keys.statusRenamed);
+    if (
+      !/^[.MADRCU]{2}$/.test(entry.xy) ||
+      !/^[NS][.SCU]{3}$/.test(entry.submodule) ||
+      !mode.test(entry.headMode) ||
+      !mode.test(entry.indexMode) ||
+      !mode.test(entry.worktreeMode) ||
+      !oid.test(entry.headOid) ||
+      !oid.test(entry.indexOid) ||
+      !/^[RC][0-9]{1,3}$/.test(entry.score) ||
+      !isExactRelativePath(entry.path) ||
+      !isExactRelativePath(entry.originalPath) ||
+      entry.path === entry.originalPath
+    ) {
+      fail("manifest_baseline_invalid");
+    }
+    return [entry.originalPath, entry.path];
+  }
+  if (entry.kind === "unmerged") {
+    exactKeys(entry, MANIFEST_SCHEMA.keys.statusUnmerged);
+    for (const field of [
+      "stage1Mode",
+      "stage2Mode",
+      "stage3Mode",
+      "worktreeMode",
+    ]) {
+      if (!mode.test(entry[field])) fail("manifest_baseline_invalid");
+    }
+    for (const field of ["stage1Oid", "stage2Oid", "stage3Oid"]) {
+      if (!oid.test(entry[field])) fail("manifest_baseline_invalid");
+    }
+    if (
+      !/^[.MADRCU]{2}$/.test(entry.xy) ||
+      !/^[NS][.SCU]{3}$/.test(entry.submodule) ||
+      !isExactRelativePath(entry.path)
+    ) {
+      fail("manifest_baseline_invalid");
+    }
+    return [entry.path];
+  }
+  if (entry.kind === "untracked") {
+    exactKeys(entry, MANIFEST_SCHEMA.keys.statusUntracked);
+    if (!isExactRelativePath(entry.path)) fail("manifest_baseline_invalid");
+    return [entry.path];
+  }
+  fail("manifest_baseline_invalid");
+}
+
+function validateWriterManifest(value, { manifestPath } = {}) {
   exactKeys(value, MANIFEST_SCHEMA.keys.root);
   assertJsonValue(value);
-
   if (value.schema !== MANIFEST_SCHEMA_ID) fail("manifest_schema_unknown");
+  assertCommonManifestFields(value);
+  const selectedIdentity = splitSelectedModel(value.route.model);
+
+  exactKeys(value.opencode, MANIFEST_SCHEMA.keys.opencode);
+  if (!isRecord(value.opencode.config) || !isRecord(value.opencode.permission)) {
+    fail("manifest_opencode_invalid");
+  }
+  rejectSecretFields(value.opencode.config, 0, true);
+  rejectSecretFields(value.opencode.permission);
+  if (
+    value.opencode.config.model !== value.route.model ||
+    value.opencode.config.default_agent !== value.route.agent
+  ) {
+    fail("manifest_opencode_invalid");
+  }
+
+  if (!isCanonicalRelativePathList(value.ownedPaths)) {
+    fail("manifest_owned_paths_invalid");
+  }
+
+  exactKeys(value.baseline, MANIFEST_SCHEMA.keys.baseline);
+  if (
+    value.baseline.branch !== value.route.branch ||
+    !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value.baseline.head) ||
+    value.baseline.indexEmpty !== true ||
+    !Array.isArray(value.baseline.status) ||
+    !Array.isArray(value.baseline.ownedPathHashes) ||
+    !Array.isArray(value.baseline.dirtyPathHashes)
+  ) {
+    fail("manifest_baseline_invalid");
+  }
+  const dirtyPaths = value.baseline.status
+    .flatMap(validateStatusEntry)
+    .sort(compareStrings);
+  if (
+    value.baseline.status.some(
+      (entry) => entry.kind === "unmerged" || (entry.xy && entry.xy[0] !== "."),
+    ) ||
+    new Set(dirtyPaths).size !== dirtyPaths.length
+  ) {
+    fail("manifest_baseline_invalid");
+  }
+  if (value.baseline.ownedPathHashes.length !== value.ownedPaths.length) {
+    fail("manifest_baseline_invalid");
+  }
+  value.baseline.ownedPathHashes.forEach((entry, index) => {
+    validatePathHash(entry, value.ownedPaths[index], "manifest_baseline_invalid");
+    if (entry.state === "symlink") fail("manifest_baseline_invalid");
+  });
+  if (value.baseline.dirtyPathHashes.length !== dirtyPaths.length) {
+    fail("manifest_baseline_invalid");
+  }
+  value.baseline.dirtyPathHashes.forEach((entry, index) => {
+    validatePathHash(entry, dirtyPaths[index], "manifest_baseline_invalid");
+  });
+  if (dirtyPaths.some((dirtyPath) => value.ownedPaths.includes(dirtyPath))) {
+    fail("manifest_baseline_invalid");
+  }
+
+  validateWorkerPermissions(value);
+
+  if (
+    !Array.isArray(value.validations) ||
+    value.validations.length === 0 ||
+    value.validations.length > MAX_VALIDATIONS
+  ) {
+    fail("manifest_validation_invalid");
+  }
+  const validationPurposes = new Set();
+  for (const validation of value.validations) {
+    exactKeys(validation, MANIFEST_SCHEMA.keys.validation);
+    assertSafeString(validation.purpose, "manifest_validation_invalid", 256);
+    if (validationPurposes.has(validation.purpose)) {
+      fail("manifest_validation_invalid");
+    }
+    validationPurposes.add(validation.purpose);
+    if (
+      !isAbsolutePath(validation.executable) ||
+      pathIsInside(value.route.targetDirectory, validation.executable, {
+        allowEqual: true,
+      }) ||
+      (path.win32.isAbsolute(validation.executable) &&
+        path.win32.extname(validation.executable).toLowerCase() !== ".exe") ||
+      !Array.isArray(validation.args) ||
+      validation.args.length > 1_000 ||
+      validation.args.some(
+        (argument) =>
+          typeof argument !== "string" ||
+          argument.length > 32_768 ||
+          argument.includes("\0"),
+      ) ||
+      !isExactRelativePath(validation.workingDirectory, { allowDot: true }) ||
+      !Number.isSafeInteger(validation.timeoutMs) ||
+      validation.timeoutMs < 1 ||
+      validation.timeoutMs > 3_600_000 ||
+      !Number.isSafeInteger(validation.maxStdoutBytes) ||
+      validation.maxStdoutBytes < 1 ||
+      validation.maxStdoutBytes > MAX_VALIDATION_OUTPUT_BYTES ||
+      !Number.isSafeInteger(validation.maxStderrBytes) ||
+      validation.maxStderrBytes < 1 ||
+      validation.maxStderrBytes > MAX_VALIDATION_OUTPUT_BYTES ||
+      !Number.isSafeInteger(validation.expectedExitCode) ||
+      validation.expectedExitCode < 0 ||
+      validation.expectedExitCode > 255
+    ) {
+      fail("manifest_validation_invalid");
+    }
+  }
+
+  exactKeys(value.commit, MANIFEST_SCHEMA.keys.commit);
+  const messageBytes =
+    typeof value.commit.message === "string"
+      ? Buffer.from(value.commit.message, "utf8")
+      : Buffer.alloc(0);
+  if (
+    value.commit.allowed !== true ||
+    value.commit.crossingId !== value.crossingId ||
+    messageBytes.length === 0 ||
+    messageBytes.length > MAX_COMMIT_MESSAGE_BYTES ||
+    value.commit.message.includes("\0") ||
+    !value.commit.message.endsWith("\n") ||
+    !value.commit.message.includes(value.crossingId) ||
+    !LOWERCASE_SHA256.test(value.commit.messageSha256) ||
+    createHash("sha256").update(messageBytes).digest("hex") !==
+      value.commit.messageSha256 ||
+    !isCanonicalRelativePathList(value.commit.candidatePaths) ||
+    value.commit.candidatePaths.some(
+      (candidatePath) => !value.ownedPaths.includes(candidatePath),
+    )
+  ) {
+    fail("manifest_commit_invalid");
+  }
+
+  exactKeys(value.artifacts, MANIFEST_SCHEMA.keys.artifacts);
+  const artifactPaths = Object.values(value.artifacts);
+  const artifactKeys = artifactPaths.map(canonicalAbsolutePath);
+  const temporaryDirectory = value.artifacts.temporaryDirectory;
+  if (
+    artifactPaths.some((artifactPath) => !isAbsolutePath(artifactPath)) ||
+    manifestPath === undefined ||
+    !isAbsolutePath(manifestPath) ||
+    !pathsEqual(value.artifacts.manifestPath, manifestPath) ||
+    new Set(artifactKeys).size !== artifactKeys.length ||
+    pathIsInside(value.route.targetDirectory, value.artifacts.manifestPath, {
+      allowEqual: true,
+    }) ||
+    pathIsInside(value.route.targetDirectory, temporaryDirectory, {
+      allowEqual: true,
+    }) ||
+    !["evidencePath", "messagePath", "hooksDirectory"].every(
+      (field) =>
+        pathIsInside(temporaryDirectory, value.artifacts[field]) &&
+        pathsEqual(
+          pathImplementationFor(temporaryDirectory).dirname(value.artifacts[field]),
+          temporaryDirectory,
+        ),
+    )
+  ) {
+    fail("manifest_artifacts_invalid");
+  }
+
+  exactKeys(value.expected, MANIFEST_SCHEMA.keys.expected);
+  if (
+    value.expected.workerStatus !== "done" ||
+    !Array.isArray(value.expected.headings) ||
+    value.expected.headings.length !== AIRLOCK_HEADINGS.length ||
+    value.expected.headings.some(
+      (heading, index) => heading !== AIRLOCK_HEADINGS[index],
+    ) ||
+    !Array.isArray(value.expected.mutations) ||
+    value.expected.mutations.length === 0 ||
+    value.expected.mutations.length > 100
+  ) {
+    fail("manifest_expected_invalid");
+  }
+  const mutationKeys = new Set();
+  const absoluteOwned = new Set(
+    value.ownedPaths.map((relativePath) =>
+      canonicalAbsolutePath(
+        pathImplementationFor(value.route.targetDirectory).join(
+          value.route.targetDirectory,
+          ...relativePath.split("/"),
+        ),
+      ),
+    ),
+  );
+  for (const mutation of value.expected.mutations) {
+    exactKeys(mutation, MANIFEST_SCHEMA.keys.mutation);
+    if (
+      !MANIFEST_SCHEMA.enums.mutationTool.includes(mutation.tool) ||
+      !isRecord(mutation.input) ||
+      !isAbsolutePath(mutation.input.filePath) ||
+      !absoluteOwned.has(canonicalAbsolutePath(mutation.input.filePath)) ||
+      !Number.isSafeInteger(mutation.minimum) ||
+      mutation.minimum < 1 ||
+      mutation.minimum > 100
+    ) {
+      fail("manifest_expected_invalid");
+    }
+    assertJsonValue(mutation.input);
+    const key = `${mutation.tool}:${stableJson(mutation.input)}`;
+    if (mutationKeys.has(key)) fail("manifest_expected_invalid");
+    mutationKeys.add(key);
+  }
+  exactKeys(value.expected.effectiveIdentity, MANIFEST_SCHEMA.keys.effectiveIdentity);
+  if (
+    value.expected.effectiveIdentity.provider !== selectedIdentity.provider ||
+    value.expected.effectiveIdentity.model !== selectedIdentity.model
+  ) {
+    fail("manifest_expected_invalid");
+  }
+
+  exactKeys(value.cleanup, MANIFEST_SCHEMA.keys.cleanup);
+  for (const field of [
+    "session",
+    "manifest",
+    "temporaryDirectory",
+    "verifyAbsence",
+  ]) {
+    if (typeof value.cleanup[field] !== "boolean") fail("manifest_cleanup_invalid");
+  }
+  if (!value.cleanup.verifyAbsence) fail("manifest_cleanup_invalid");
+  exactKeys(value.retention, MANIFEST_SCHEMA.keys.retention);
+  for (const field of ["session", "manifest", "temporaryDirectory"]) {
+    if (
+      !MANIFEST_SCHEMA.enums.retention.includes(value.retention[field]) ||
+      value.cleanup[field] !== (value.retention[field] === "temporary")
+    ) {
+      fail("manifest_retention_invalid");
+    }
+  }
+  if (
+    value.retention.transcript !== "none" ||
+    value.retention.temporaryDirectory !== "temporary"
+  ) {
+    fail("manifest_retention_invalid");
+  }
+
+  exactKeys(value.policy, MANIFEST_SCHEMA.keys.policy);
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(value.policy.identity) ||
+    !SAFE_POLICY_PROOF.test(value.policy.proof) ||
+    value.policy.identity !==
+      computePolicyIdentity(value.opencode.config, value.opencode.permission)
+  ) {
+    fail("manifest_policy_invalid");
+  }
+
+  const requiredPromptAnchors = [
+    value.packId,
+    value.crossingId,
+    value.route.agent,
+    value.route.model,
+    value.route.variant,
+    value.route.targetDirectory,
+    value.route.branch,
+    value.baseline.head,
+    ...value.ownedPaths,
+    ...value.commit.candidatePaths,
+    value.artifacts.manifestPath,
+    value.artifacts.evidencePath,
+    value.policy.identity,
+    value.policy.proof,
+  ];
+  if (requiredPromptAnchors.some((anchor) => !value.prompt.includes(anchor))) {
+    fail("manifest_prompt_incomplete");
+  }
+  return value;
+}
+
+function validateLegacyManifest(value, { manifestPath } = {}) {
+  exactKeys(value, LEGACY_MANIFEST_SCHEMA.keys.root);
+  assertJsonValue(value);
+
+  if (value.schema !== LEGACY_MANIFEST_SCHEMA_ID) fail("manifest_schema_unknown");
   if (value.runtime !== "opencode") fail("manifest_runtime_unknown");
   if (!PACK_ID.test(value.packId)) fail("manifest_ids_invalid");
   if (
@@ -277,7 +966,7 @@ export function validateManifest(value, { manifestPath } = {}) {
     fail("manifest_ids_invalid");
   }
 
-  exactKeys(value.route, MANIFEST_SCHEMA.keys.route);
+  exactKeys(value.route, LEGACY_MANIFEST_SCHEMA.keys.route);
   for (const field of ["agent", "model", "variant"]) {
     assertSafeString(value.route[field], "manifest_route_invalid", 256);
     if (!SAFE_IDENTIFIER.test(value.route[field])) fail("manifest_route_invalid");
@@ -291,7 +980,7 @@ export function validateManifest(value, { manifestPath } = {}) {
   assertSafeString(value.prompt, "manifest_prompt_invalid", MAX_PROMPT_CHARACTERS);
   if (value.prompt.trimStart().startsWith("-")) fail("manifest_prompt_invalid");
 
-  exactKeys(value.opencode, MANIFEST_SCHEMA.keys.opencode);
+  exactKeys(value.opencode, LEGACY_MANIFEST_SCHEMA.keys.opencode);
   if (!isRecord(value.opencode.config) || !isRecord(value.opencode.permission)) {
     fail("manifest_opencode_invalid");
   }
@@ -312,6 +1001,11 @@ export function validateManifest(value, { manifestPath } = {}) {
   ) {
     fail("manifest_permission_not_total");
   }
+  for (const tool of ["edit", "write", "patch", "apply_patch", "bash"]) {
+    if (!isDenyOnly(value.opencode.permission[tool])) {
+      fail("legacy_writer_unsupported");
+    }
+  }
 
   if (
     !Number.isSafeInteger(value.timeoutMs) ||
@@ -329,8 +1023,10 @@ export function validateManifest(value, { manifestPath } = {}) {
     fail("manifest_evidence_invalid");
   }
 
-  exactKeys(value.expected, MANIFEST_SCHEMA.keys.expected);
-  if (!MANIFEST_SCHEMA.enums.workerStatus.includes(value.expected.workerStatus)) {
+  exactKeys(value.expected, LEGACY_MANIFEST_SCHEMA.keys.expected);
+  if (
+    !LEGACY_MANIFEST_SCHEMA.enums.workerStatus.includes(value.expected.workerStatus)
+  ) {
     fail("manifest_expected_invalid");
   }
   if (
@@ -351,7 +1047,7 @@ export function validateManifest(value, { manifestPath } = {}) {
   }
   const toolExpectationKeys = new Set();
   for (const expectation of value.expected.toolEvents) {
-    exactKeys(expectation, MANIFEST_SCHEMA.keys.toolEvent);
+    exactKeys(expectation, LEGACY_MANIFEST_SCHEMA.keys.toolEvent);
     if (!SAFE_IDENTIFIER.test(expectation.tool)) fail("manifest_expected_invalid");
     if (!isRecord(expectation.input)) fail("manifest_expected_invalid");
     assertJsonValue(expectation.input);
@@ -365,10 +1061,13 @@ export function validateManifest(value, { manifestPath } = {}) {
     const key = `${expectation.tool}:${stableJson(expectation.input)}`;
     if (toolExpectationKeys.has(key)) fail("manifest_expected_invalid");
     toolExpectationKeys.add(key);
+    if (["edit", "write", "patch", "apply_patch", "bash"].includes(expectation.tool)) {
+      fail("legacy_writer_unsupported");
+    }
   }
   exactKeys(
     value.expected.effectiveIdentity,
-    MANIFEST_SCHEMA.keys.effectiveIdentity,
+    LEGACY_MANIFEST_SCHEMA.keys.effectiveIdentity,
   );
   if (
     value.expected.effectiveIdentity.provider !== selectedIdentity.provider ||
@@ -377,15 +1076,17 @@ export function validateManifest(value, { manifestPath } = {}) {
     fail("manifest_expected_invalid");
   }
 
-  exactKeys(value.cleanup, MANIFEST_SCHEMA.keys.cleanup);
+  exactKeys(value.cleanup, LEGACY_MANIFEST_SCHEMA.keys.cleanup);
   for (const field of ["session", "evidence", "manifest", "verifyAbsence"]) {
     if (typeof value.cleanup[field] !== "boolean") fail("manifest_cleanup_invalid");
   }
   if (!value.cleanup.verifyAbsence) fail("manifest_cleanup_invalid");
 
-  exactKeys(value.retention, MANIFEST_SCHEMA.keys.retention);
+  exactKeys(value.retention, LEGACY_MANIFEST_SCHEMA.keys.retention);
   for (const field of ["session", "evidence", "manifest"]) {
-    if (!MANIFEST_SCHEMA.enums.retention.includes(value.retention[field])) {
+    if (
+      !LEGACY_MANIFEST_SCHEMA.enums.retention.includes(value.retention[field])
+    ) {
       fail("manifest_retention_invalid");
     }
     if (value.cleanup[field] !== (value.retention[field] === "temporary")) {
@@ -394,7 +1095,7 @@ export function validateManifest(value, { manifestPath } = {}) {
   }
   if (value.retention.transcript !== "none") fail("manifest_retention_invalid");
 
-  exactKeys(value.policy, MANIFEST_SCHEMA.keys.policy);
+  exactKeys(value.policy, LEGACY_MANIFEST_SCHEMA.keys.policy);
   if (!/^sha256:[a-f0-9]{64}$/.test(value.policy.identity)) {
     fail("manifest_policy_invalid");
   }
@@ -423,6 +1124,19 @@ export function validateManifest(value, { manifestPath } = {}) {
   }
 
   return value;
+}
+
+export function validateManifest(value, options = {}) {
+  if (!isRecord(value) || typeof value.schema !== "string") {
+    fail("manifest_malformed");
+  }
+  if (value.schema === LEGACY_MANIFEST_SCHEMA_ID) {
+    return validateLegacyManifest(value, options);
+  }
+  if (value.schema === MANIFEST_SCHEMA_ID) {
+    return validateWriterManifest(value, options);
+  }
+  fail("manifest_schema_unknown");
 }
 
 export function parseCliArguments(argv) {
@@ -616,6 +1330,192 @@ export async function resolveOpenCodeInvocation({
   }
 
   fail("opencode_direct_executable_not_found");
+}
+
+async function isDirectExecutable(candidate, platform, dependencies) {
+  try {
+    const information = await dependencies.lstat(candidate);
+    if (!information.isFile() || information.isSymbolicLink()) return false;
+    if (platform === "win32") {
+      return path.win32.extname(candidate).toLowerCase() === ".exe";
+    }
+    await dependencies.access(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function resolveGitInvocation({
+  platform = process.platform,
+  environment = process.env,
+  access = nodeAccess,
+  lstat = nodeLstat,
+} = {}) {
+  const pathValue = Object.entries(environment).find(
+    ([key]) => key.toUpperCase() === "PATH",
+  )?.[1];
+  const separator = platform === "win32" ? ";" : ":";
+  const implementation = platform === "win32" ? path.win32 : path.posix;
+  const executableName = platform === "win32" ? "git.exe" : "git";
+  const seen = new Set();
+  for (const rawEntry of String(pathValue ?? "").split(separator)) {
+    const directory = rawEntry.replace(/^"|"$/g, "");
+    if (!directory || !implementation.isAbsolute(directory)) continue;
+    const candidate = implementation.join(directory, executableName);
+    const key = platform === "win32" ? candidate.toLowerCase() : candidate;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (await isDirectExecutable(candidate, platform, { access, lstat })) {
+      return {
+        command: candidate,
+        prefixArgs: [],
+        kind: platform === "win32" ? "direct-exe-path" : "direct-posix-path",
+      };
+    }
+  }
+  fail("git_direct_executable_not_found");
+}
+
+const CLOSED_ENVIRONMENT_KEYS = new Set([
+  "APPDATA",
+  "COMSPEC",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOCALAPPDATA",
+  "PATH",
+  "PATHEXT",
+  "SYSTEMDRIVE",
+  "SYSTEMROOT",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USERPROFILE",
+  "WINDIR",
+]);
+
+export function buildClosedEnvironment(inherited = process.env) {
+  const environment = {};
+  for (const [key, value] of Object.entries(inherited)) {
+    if (
+      CLOSED_ENVIRONMENT_KEYS.has(key.toUpperCase()) &&
+      typeof value === "string" &&
+      !value.includes("\0")
+    ) {
+      environment[key] = value;
+    }
+  }
+  environment.GIT_TERMINAL_PROMPT = "0";
+  environment.GCM_INTERACTIVE = "Never";
+  environment.GCM_GUI_PROMPT = "0";
+  environment.GIT_OPTIONAL_LOCKS = "0";
+  environment.GIT_LITERAL_PATHSPECS = "1";
+  environment.GIT_NO_REPLACE_OBJECTS = "1";
+  environment.GIT_CONFIG_COUNT = "1";
+  environment.GIT_CONFIG_KEY_0 = "remote.origin.pushurl";
+  environment.GIT_CONFIG_VALUE_0 = INVALID_ORIGIN_PUSH_URL;
+  return environment;
+}
+
+export function buildWriterChildEnvironment(manifest, inherited = process.env) {
+  const environment = buildClosedEnvironment(inherited);
+  const openCodeGitBashPath = Object.entries(inherited).find(
+    ([key]) => key.toUpperCase() === "OPENCODE_GIT_BASH_PATH",
+  )?.[1];
+  if (typeof openCodeGitBashPath === "string" && openCodeGitBashPath.length > 0) {
+    environment.OPENCODE_GIT_BASH_PATH = openCodeGitBashPath;
+  }
+  environment.OPENCODE_CONFIG_CONTENT = JSON.stringify(manifest.opencode.config);
+  environment.OPENCODE_PERMISSION = JSON.stringify(manifest.opencode.permission);
+  return environment;
+}
+
+function parseStatusRecord(record, originalPath = null) {
+  let match = record.match(
+    /^1 (\S{2}) (\S+) (\S{6}) (\S{6}) (\S{6}) (\S+) (\S+) (.+)$/s,
+  );
+  if (match) {
+    return {
+      kind: "ordinary",
+      xy: match[1],
+      submodule: match[2],
+      headMode: match[3],
+      indexMode: match[4],
+      worktreeMode: match[5],
+      headOid: match[6],
+      indexOid: match[7],
+      path: match[8],
+    };
+  }
+  match = record.match(
+    /^2 (\S{2}) (\S+) (\S{6}) (\S{6}) (\S{6}) (\S+) (\S+) (\S+) (.+)$/s,
+  );
+  if (match && originalPath !== null) {
+    return {
+      kind: "renamed",
+      xy: match[1],
+      submodule: match[2],
+      headMode: match[3],
+      indexMode: match[4],
+      worktreeMode: match[5],
+      headOid: match[6],
+      indexOid: match[7],
+      score: match[8],
+      path: match[9],
+      originalPath,
+    };
+  }
+  match = record.match(
+    /^u (\S{2}) (\S+) (\S{6}) (\S{6}) (\S{6}) (\S{6}) (\S+) (\S+) (\S+) (.+)$/s,
+  );
+  if (match) {
+    return {
+      kind: "unmerged",
+      xy: match[1],
+      submodule: match[2],
+      stage1Mode: match[3],
+      stage2Mode: match[4],
+      stage3Mode: match[5],
+      worktreeMode: match[6],
+      stage1Oid: match[7],
+      stage2Oid: match[8],
+      stage3Oid: match[9],
+      path: match[10],
+    };
+  }
+  if (record.startsWith("? ") && record.length > 2) {
+    return { kind: "untracked", path: record.slice(2) };
+  }
+  fail("preflight_status_malformed");
+}
+
+export function parsePorcelainV2Status(bytes) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    fail("preflight_status_malformed");
+  }
+  if (text === "") return [];
+  const records = text.split("\0");
+  if (records.at(-1) !== "") fail("preflight_status_malformed");
+  records.pop();
+  const entries = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.startsWith("2 ")) {
+      if (index + 1 >= records.length || records[index + 1].length === 0) {
+        fail("preflight_status_malformed");
+      }
+      entries.push(parseStatusRecord(record, records[index + 1]));
+      index += 1;
+    } else {
+      entries.push(parseStatusRecord(record));
+    }
+  }
+  for (const entry of entries) validateStatusEntry(entry);
+  return entries;
 }
 
 export function buildRunArguments(manifest) {
@@ -909,6 +1809,1276 @@ function processEnded(result) {
   return result.processState !== "unknown" && result.terminationConfirmed;
 }
 
+const GIT_READ_CONFIG_ARGS = Object.freeze([
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.untrackedCache=false",
+  "-c",
+  "diff.external=",
+  "-c",
+  "interactive.diffFilter=",
+]);
+
+async function runGitCommand(
+  dependencies,
+  invocation,
+  targetDirectory,
+  args,
+  {
+    purpose,
+    acceptedExitCodes = [0],
+    timeoutMs = 30_000,
+    maxStdoutBytes = MAX_VALIDATION_OUTPUT_BYTES,
+    maxStderrBytes = MAX_STDERR_BYTES,
+    writeOperation = false,
+  } = {},
+) {
+  const environment = buildClosedEnvironment(dependencies.environment);
+  if (writeOperation) environment.GIT_OPTIONAL_LOCKS = "1";
+  const result = normalizeProcessResult(
+    await dependencies.runGitProcess({
+      purpose: `git-${purpose}`,
+      command: invocation.command,
+      args: [...invocation.prefixArgs, ...GIT_READ_CONFIG_ARGS, ...args],
+      cwd: targetDirectory,
+      env: environment,
+      timeoutMs,
+      captureStdout: true,
+      maxStdoutBytes,
+      maxStderrBytes,
+    }),
+  );
+  if (!processEnded(result)) {
+    dependencies.processStateUnknown = true;
+    fail("git_process_state_unknown");
+  }
+  if (result.timedOut) fail("git_timeout");
+  if (result.stdoutTruncated || result.stderrTruncated) fail("git_output_limit");
+  if (!acceptedExitCodes.includes(result.exitCode)) fail("git_command_failed");
+  return result;
+}
+
+function decodeGitText(buffer, code = "git_output_invalid") {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    fail(code);
+  }
+}
+
+function exactGitLine(buffer, code = "git_output_invalid") {
+  const text = decodeGitText(buffer, code);
+  const value = text.replace(/\r?\n$/, "");
+  if (value.length === 0 || /[\r\n\0]/.test(value)) fail(code);
+  return value;
+}
+
+async function inspectRelativePath(targetDirectory, relativePath, dependencies) {
+  const implementation = pathImplementationFor(targetDirectory);
+  let current = targetDirectory;
+  const components = relativePath.split("/");
+  for (let index = 0; index < components.length; index += 1) {
+    current = implementation.join(current, components[index]);
+    const information = await pathInformation(current, dependencies.lstat);
+    if (!information.exists) return { path: relativePath, state: "absent", sha256: null };
+    if (information.stat.isSymbolicLink()) fail("preflight_path_symlink");
+    const final = index === components.length - 1;
+    if (!final) {
+      if (!information.stat.isDirectory()) fail("preflight_path_invalid");
+      continue;
+    }
+    if (!information.stat.isFile()) fail("preflight_path_invalid");
+    const bytes = await dependencies.readFile(current);
+    return {
+      path: relativePath,
+      state: "file",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+  fail("preflight_path_invalid");
+}
+
+function statusPaths(status) {
+  return status.flatMap((entry) =>
+    entry.kind === "renamed" ? [entry.originalPath, entry.path] : [entry.path],
+  );
+}
+
+async function inspectPathHashes(targetDirectory, paths, dependencies) {
+  const values = [];
+  for (const relativePath of paths) {
+    values.push(
+      await inspectRelativePath(targetDirectory, relativePath, dependencies),
+    );
+  }
+  return values;
+}
+
+async function verifyNoSymlinkComponents(absolutePath, dependencies) {
+  const implementation = pathImplementationFor(absolutePath);
+  const parsed = implementation.parse(absolutePath);
+  let current = parsed.root;
+  const components = absolutePath
+    .slice(parsed.root.length)
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  for (const component of components) {
+    current = implementation.join(current, component);
+    const information = await pathInformation(current, dependencies.lstat);
+    if (!information.exists) return;
+    if (information.stat.isSymbolicLink()) fail("preflight_path_symlink");
+  }
+}
+
+async function verifyArtifactPreflight(manifest, dependencies) {
+  const target = await pathInformation(
+    manifest.route.targetDirectory,
+    dependencies.lstat,
+  );
+  if (
+    !target.exists ||
+    !target.stat.isDirectory() ||
+    target.stat.isSymbolicLink()
+  ) {
+    fail("target_directory_invalid");
+  }
+  await verifyNoSymlinkComponents(manifest.route.targetDirectory, dependencies);
+  const targetRealPath = await dependencies.realpath(manifest.route.targetDirectory);
+
+  const temporaryDirectory = manifest.artifacts.temporaryDirectory;
+  const temporaryParent = pathImplementationFor(temporaryDirectory).dirname(
+    temporaryDirectory,
+  );
+  const parent = await pathInformation(temporaryParent, dependencies.lstat);
+  if (
+    !parent.exists ||
+    !parent.stat.isDirectory() ||
+    parent.stat.isSymbolicLink()
+  ) {
+    fail("artifact_parent_invalid");
+  }
+  await verifyNoSymlinkComponents(temporaryParent, dependencies);
+  const [temporaryParentRealPath, manifestRealPath] = await Promise.all([
+    dependencies.realpath(temporaryParent),
+    dependencies.realpath(manifest.artifacts.manifestPath),
+  ]);
+  if (
+    pathsEqual(targetRealPath, temporaryParentRealPath) ||
+    pathIsInside(targetRealPath, temporaryParentRealPath, { allowEqual: true }) ||
+    pathsEqual(targetRealPath, manifestRealPath) ||
+    pathIsInside(targetRealPath, manifestRealPath, { allowEqual: true })
+  ) {
+    fail("manifest_artifacts_invalid");
+  }
+  for (const field of [
+    "temporaryDirectory",
+    "evidencePath",
+    "messagePath",
+    "hooksDirectory",
+  ]) {
+    const information = await pathInformation(
+      manifest.artifacts[field],
+      dependencies.lstat,
+    );
+    if (information.exists) fail("artifact_path_exists");
+  }
+}
+
+async function inspectIndexHash(
+  manifest,
+  dependencies,
+  gitInvocation,
+) {
+  const indexResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    manifest.route.targetDirectory,
+    ["rev-parse", "--git-path", "index"],
+    { purpose: "index-path" },
+  );
+  const rawIndexPath = exactGitLine(indexResult.stdout);
+  const implementation = pathImplementationFor(manifest.route.targetDirectory);
+  const indexPath = implementation.isAbsolute(rawIndexPath)
+    ? rawIndexPath
+    : implementation.resolve(manifest.route.targetDirectory, rawIndexPath);
+  const information = await pathInformation(indexPath, dependencies.lstat);
+  if (
+    !information.exists ||
+    !information.stat.isFile() ||
+    information.stat.isSymbolicLink()
+  ) {
+    fail("preflight_index_invalid");
+  }
+  const bytes = await dependencies.readFile(indexPath);
+  return {
+    path: indexPath,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+async function captureRepositoryState(
+  manifest,
+  dependencies,
+  gitInvocation,
+) {
+  const targetDirectory = manifest.route.targetDirectory;
+  const rootResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-parse", "--show-toplevel"],
+    { purpose: "root" },
+  );
+  const reportedRoot = exactGitLine(rootResult.stdout);
+  const [reportedRootRealPath, targetRealPath] = await Promise.all([
+    dependencies.realpath(reportedRoot),
+    dependencies.realpath(targetDirectory),
+  ]);
+  if (!pathsEqual(reportedRootRealPath, targetRealPath)) {
+    fail("preflight_repository_root_mismatch");
+  }
+  const branchResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    { purpose: "branch", acceptedExitCodes: [0, 1] },
+  );
+  const branch =
+    branchResult.exitCode === 0 ? exactGitLine(branchResult.stdout) : null;
+  const headResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-parse", "HEAD"],
+    { purpose: "head" },
+  );
+  const head = exactGitLine(headResult.stdout);
+  const indexResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["diff", "--cached", "--quiet", "--exit-code", "HEAD", "--"],
+    { purpose: "index-empty", acceptedExitCodes: [0, 1] },
+  );
+  const statusResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    [
+      "status",
+      "--porcelain=v2",
+      "-z",
+      "--untracked-files=all",
+      "--ignore-submodules=none",
+    ],
+    { purpose: "status" },
+  );
+  const status = parsePorcelainV2Status(statusResult.stdout);
+  const ownedPathHashes = await inspectPathHashes(
+    targetDirectory,
+    manifest.ownedPaths,
+    dependencies,
+  );
+  const dirtyPaths = [...new Set(statusPaths(status))].sort(compareStrings);
+  const dirtyPathHashes = await inspectPathHashes(
+    targetDirectory,
+    dirtyPaths,
+    dependencies,
+  );
+  const index = await inspectIndexHash(manifest, dependencies, gitInvocation);
+  return {
+    branch,
+    head,
+    indexEmpty: indexResult.exitCode === 0,
+    index,
+    status,
+    ownedPathHashes,
+    dirtyPathHashes,
+  };
+}
+
+function statesEqual(left, right) {
+  return stableJson(left) === stableJson(right);
+}
+
+async function preflightWriter(manifest, dependencies) {
+  await verifyArtifactPreflight(manifest, dependencies);
+  const gitInvocation = validateResolvedGitInvocation(
+    await dependencies.resolveGit(),
+  );
+  const [targetRealPath, gitRealPath] = await Promise.all([
+    dependencies.realpath(manifest.route.targetDirectory),
+    dependencies.realpath(gitInvocation.command),
+  ]);
+  if (
+    pathsEqual(targetRealPath, gitRealPath) ||
+    pathIsInside(targetRealPath, gitRealPath, { allowEqual: true })
+  ) {
+    fail("git_executable_inside_checkout");
+  }
+  const state = await captureRepositoryState(
+    manifest,
+    dependencies,
+    gitInvocation,
+  );
+  if (state.branch !== manifest.baseline.branch) {
+    fail("preflight_branch_mismatch");
+  }
+  if (state.head !== manifest.baseline.head) fail("preflight_head_mismatch");
+  if (!state.indexEmpty) fail("preflight_index_not_empty");
+
+  const actualStatusPaths = new Set(statusPaths(state.status));
+  if (
+    state.ownedPathHashes.some(
+      (entry, index) =>
+        !statesEqual(entry, manifest.baseline.ownedPathHashes[index]),
+    ) ||
+    manifest.ownedPaths.some((ownedPath) => actualStatusPaths.has(ownedPath))
+  ) {
+    fail("preflight_owned_path_dirty");
+  }
+  if (!statesEqual(state.status, manifest.baseline.status)) {
+    fail("preflight_status_mismatch");
+  }
+  if (!statesEqual(state.dirtyPathHashes, manifest.baseline.dirtyPathHashes)) {
+    fail("preflight_baseline_dirty_changed");
+  }
+  return { gitInvocation, state };
+}
+
+function subtractStatusEntries(current, baseline) {
+  const remaining = new Map();
+  for (const entry of baseline) {
+    const key = stableJson(entry);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const delta = [];
+  for (const entry of current) {
+    const key = stableJson(entry);
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) remaining.set(key, count - 1);
+    else delta.push(entry);
+  }
+  if ([...remaining.values()].some((count) => count !== 0)) {
+    fail("worker_baseline_status_changed");
+  }
+  return delta;
+}
+
+async function assessWorkerDelta(manifest, dependencies, preflight) {
+  const state = await captureRepositoryState(
+    manifest,
+    dependencies,
+    preflight.gitInvocation,
+  );
+  if (state.branch !== manifest.baseline.branch) fail("worker_branch_changed");
+  if (state.head !== manifest.baseline.head) fail("worker_head_changed");
+  if (!state.indexEmpty || state.index.sha256 !== preflight.state.index.sha256) {
+    fail("worker_index_changed");
+  }
+
+  const baselineDirtyPaths = manifest.baseline.dirtyPathHashes.map(
+    (entry) => entry.path,
+  );
+  const baselineDirtyPathHashes = await inspectPathHashes(
+    manifest.route.targetDirectory,
+    baselineDirtyPaths,
+    dependencies,
+  );
+  if (!statesEqual(baselineDirtyPathHashes, manifest.baseline.dirtyPathHashes)) {
+    fail("worker_baseline_dirty_changed");
+  }
+
+  const deltaEntries = subtractStatusEntries(
+    state.status,
+    manifest.baseline.status,
+  );
+  if (
+    deltaEntries.some(
+      (entry) => entry.kind === "unmerged" || (entry.xy && entry.xy[0] !== "."),
+    )
+  ) {
+    fail("worker_index_changed");
+  }
+  const actualCandidatePaths = [...new Set(statusPaths(deltaEntries))].sort(
+    compareStrings,
+  );
+  const unexpectedPaths = actualCandidatePaths.filter(
+    (candidatePath) => !manifest.commit.candidatePaths.includes(candidatePath),
+  );
+  if (unexpectedPaths.length > 0) fail("worker_delta_out_of_contract");
+  if (!statesEqual(actualCandidatePaths, manifest.commit.candidatePaths)) {
+    fail("worker_delta_mismatch");
+  }
+
+  for (let index = 0; index < state.ownedPathHashes.length; index += 1) {
+    const actual = state.ownedPathHashes[index];
+    const baseline = manifest.baseline.ownedPathHashes[index];
+    const candidate = manifest.commit.candidatePaths.includes(actual.path);
+    if (candidate === statesEqual(actual, baseline)) {
+      fail(candidate ? "worker_delta_mismatch" : "worker_delta_out_of_contract");
+    }
+  }
+  return {
+    ...state,
+    deltaEntries,
+    candidatePaths: actualCandidatePaths,
+    baselineDirtyPathHashes,
+  };
+}
+
+function candidateStateFingerprint(state) {
+  return stableJson({
+    branch: state.branch,
+    head: state.head,
+    indexEmpty: state.indexEmpty,
+    indexSha256: state.index.sha256,
+    status: state.status,
+    ownedPathHashes: state.ownedPathHashes,
+    baselineDirtyPathHashes: state.baselineDirtyPathHashes,
+    candidatePaths: state.candidatePaths,
+  });
+}
+
+async function validateExecutableAtRuntime(manifest, validation, dependencies) {
+  const information = await pathInformation(
+    validation.executable,
+    dependencies.lstat,
+  );
+  if (
+    !information.exists ||
+    !information.stat.isFile() ||
+    information.stat.isSymbolicLink()
+  ) {
+    fail("validation_executable_invalid");
+  }
+  await verifyNoSymlinkComponents(validation.executable, dependencies);
+  const [targetRealPath, executableRealPath] = await Promise.all([
+    dependencies.realpath(manifest.route.targetDirectory),
+    dependencies.realpath(validation.executable),
+  ]);
+  if (
+    pathsEqual(targetRealPath, executableRealPath) ||
+    pathIsInside(targetRealPath, executableRealPath, { allowEqual: true })
+  ) {
+    fail("validation_executable_invalid");
+  }
+  try {
+    await dependencies.access(validation.executable, fsConstants.X_OK);
+  } catch {
+    fail("validation_executable_invalid");
+  }
+}
+
+async function validationWorkingDirectory(manifest, validation, dependencies) {
+  const implementation = pathImplementationFor(manifest.route.targetDirectory);
+  const workingDirectory =
+    validation.workingDirectory === "."
+      ? manifest.route.targetDirectory
+      : implementation.join(
+          manifest.route.targetDirectory,
+          ...validation.workingDirectory.split("/"),
+        );
+  const information = await pathInformation(workingDirectory, dependencies.lstat);
+  if (
+    !information.exists ||
+    !information.stat.isDirectory() ||
+    information.stat.isSymbolicLink()
+  ) {
+    fail("validation_working_directory_invalid");
+  }
+  try {
+    await verifyNoSymlinkComponents(workingDirectory, dependencies);
+  } catch (error) {
+    if (launcherClassification(error) === "preflight_path_symlink") {
+      fail("validation_working_directory_invalid");
+    }
+    throw error;
+  }
+  const [targetRealPath, workingRealPath] = await Promise.all([
+    dependencies.realpath(manifest.route.targetDirectory),
+    dependencies.realpath(workingDirectory),
+  ]);
+  if (
+    !pathsEqual(targetRealPath, workingRealPath) &&
+    !pathIsInside(targetRealPath, workingRealPath)
+  ) {
+    fail("validation_working_directory_invalid");
+  }
+  return workingDirectory;
+}
+
+async function runDeterministicValidations(
+  manifest,
+  dependencies,
+  preflight,
+  expectedCandidateState,
+) {
+  const evidence = [];
+  for (const validation of manifest.validations) {
+    await validateExecutableAtRuntime(manifest, validation, dependencies);
+    const cwd = await validationWorkingDirectory(
+      manifest,
+      validation,
+      dependencies,
+    );
+    const result = normalizeProcessResult(
+      await dependencies.runValidationProcess({
+        purpose: `validation:${validation.purpose}`,
+        command: validation.executable,
+        args: [...validation.args],
+        cwd,
+        env: buildClosedEnvironment(dependencies.environment),
+        timeoutMs: validation.timeoutMs,
+        captureStdout: true,
+        maxStdoutBytes: validation.maxStdoutBytes,
+        maxStderrBytes: validation.maxStderrBytes,
+      }),
+    );
+    evidence.push({
+      purpose: validation.purpose,
+      exitCode: result.exitCode,
+      timedOut: result.timedOut,
+      stdoutBytes: result.stdoutBytes,
+      stdoutTruncated: result.stdoutTruncated,
+      stderrBytes: result.stderrBytes,
+      stderrTruncated: result.stderrTruncated,
+    });
+    const processQuiescent = processEnded(result);
+    let stateUnchanged = false;
+    if (processQuiescent) {
+      try {
+        const afterValidation = await assessWorkerDelta(
+          manifest,
+          dependencies,
+          preflight,
+        );
+        stateUnchanged =
+          candidateStateFingerprint(afterValidation) ===
+          candidateStateFingerprint(expectedCandidateState);
+      } catch {
+        stateUnchanged = false;
+      }
+    }
+    result.stdout.fill(0);
+    result.stderr.fill(0);
+    if (!processQuiescent) {
+      dependencies.processStateUnknown = true;
+      fail("validation_process_state_unknown");
+    }
+    if (!stateUnchanged) fail("validation_created_delta");
+    if (result.timedOut) fail("validation_timeout");
+    if (result.stdoutTruncated || result.stderrTruncated) {
+      fail("validation_output_limit");
+    }
+    if (result.exitCode !== validation.expectedExitCode) {
+      fail("validation_exit_nonzero");
+    }
+  }
+  return evidence;
+}
+
+function parseNulPathList(buffer, code) {
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    fail(code);
+  }
+  if (text === "") return [];
+  const values = text.split("\0");
+  if (values.at(-1) !== "") fail(code);
+  values.pop();
+  if (values.some((value) => !isExactRelativePath(value))) fail(code);
+  return values;
+}
+
+async function verifyEmptyHooksDirectory(manifest, dependencies) {
+  const information = await pathInformation(
+    manifest.artifacts.hooksDirectory,
+    dependencies.lstat,
+  );
+  if (
+    !information.exists ||
+    !information.stat.isDirectory() ||
+    information.stat.isSymbolicLink() ||
+    (await dependencies.readdir(manifest.artifacts.hooksDirectory)).length !== 0
+  ) {
+    fail("hooks_directory_not_empty");
+  }
+}
+
+async function rejectCustomFilters(manifest, dependencies, gitInvocation) {
+  const result = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    manifest.route.targetDirectory,
+    ["check-attr", "-z", "filter", "--", ...manifest.ownedPaths],
+    { purpose: "check-filter" },
+  );
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(result.stdout);
+  } catch {
+    fail("git_check_attr_malformed");
+  }
+  const values = text === "" ? [] : text.split("\0");
+  if (values.at(-1) === "") values.pop();
+  if (values.length !== manifest.ownedPaths.length * 3) {
+    fail("git_check_attr_malformed");
+  }
+  for (let index = 0; index < values.length; index += 3) {
+    const expectedPath = manifest.ownedPaths[index / 3];
+    if (
+      values[index] !== expectedPath ||
+      values[index + 1] !== "filter" ||
+      !["unspecified", "unset"].includes(values[index + 2])
+    ) {
+      if (
+        values[index] === expectedPath &&
+        values[index + 1] === "filter" &&
+        values[index + 2]
+      ) {
+        fail("custom_filter_forbidden");
+      }
+      fail("git_check_attr_malformed");
+    }
+  }
+}
+
+async function writeAndVerifyCommitMessage(manifest, dependencies) {
+  const bytes = Buffer.from(manifest.commit.message, "utf8");
+  try {
+    await dependencies.writeFile(manifest.artifacts.messagePath, bytes, {
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch (error) {
+    if (error?.code === "EEXIST") fail("artifact_path_exists");
+    throw error;
+  }
+  const information = await pathInformation(
+    manifest.artifacts.messagePath,
+    dependencies.lstat,
+  );
+  if (
+    !information.exists ||
+    !information.stat.isFile() ||
+    information.stat.isSymbolicLink() ||
+    information.stat.size !== bytes.length
+  ) {
+    fail("commit_message_file_invalid");
+  }
+  const roundTrip = await dependencies.readFile(manifest.artifacts.messagePath);
+  if (
+    createHash("sha256").update(roundTrip).digest("hex") !==
+      manifest.commit.messageSha256 ||
+    roundTrip.length !== bytes.length ||
+    !timingSafeEqual(roundTrip, bytes)
+  ) {
+    fail("commit_message_file_invalid");
+  }
+}
+
+async function cachedPaths(
+  manifest,
+  dependencies,
+  gitInvocation,
+) {
+  const result = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    manifest.route.targetDirectory,
+    [
+      "diff",
+      "--cached",
+      "--name-only",
+      "-z",
+      "--no-renames",
+      "HEAD",
+      "--",
+    ],
+    { purpose: "cached-paths" },
+  );
+  return parseNulPathList(result.stdout, "cached_paths_malformed").sort(
+    compareStrings,
+  );
+}
+
+async function stagedTree(manifest, dependencies, gitInvocation) {
+  const result = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    manifest.route.targetDirectory,
+    ["write-tree"],
+    { purpose: "write-tree", writeOperation: true },
+  );
+  const tree = exactGitLine(result.stdout);
+  if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tree)) {
+    fail("staged_tree_invalid");
+  }
+  return tree;
+}
+
+async function verifyStagedCandidate(
+  manifest,
+  dependencies,
+  preflight,
+  candidateState,
+  expectedTree,
+) {
+  const state = await captureRepositoryState(
+    manifest,
+    dependencies,
+    preflight.gitInvocation,
+  );
+  if (state.branch !== manifest.baseline.branch) fail("race_branch_changed");
+  if (state.head !== manifest.baseline.head) fail("race_head_changed");
+  if (state.indexEmpty) fail("race_index_changed");
+  if (!statesEqual(state.ownedPathHashes, candidateState.ownedPathHashes)) {
+    fail("race_owned_path_changed");
+  }
+  const baselineDirtyPathHashes = await inspectPathHashes(
+    manifest.route.targetDirectory,
+    manifest.baseline.dirtyPathHashes.map((entry) => entry.path),
+    dependencies,
+  );
+  if (!statesEqual(baselineDirtyPathHashes, manifest.baseline.dirtyPathHashes)) {
+    fail("race_baseline_dirty_changed");
+  }
+  const deltaEntries = subtractStatusEntries(
+    state.status,
+    manifest.baseline.status,
+  );
+  const deltaPaths = [...new Set(statusPaths(deltaEntries))].sort(compareStrings);
+  if (!statesEqual(deltaPaths, manifest.commit.candidatePaths)) {
+    fail("race_status_changed");
+  }
+  if (
+    deltaEntries.some(
+      (entry) =>
+        entry.kind === "unmerged" ||
+        !entry.xy ||
+        entry.xy[0] === "." ||
+        entry.xy[1] !== ".",
+    )
+  ) {
+    fail("race_index_changed");
+  }
+  const cached = await cachedPaths(manifest, dependencies, preflight.gitInvocation);
+  if (!statesEqual(cached, manifest.commit.candidatePaths)) {
+    fail("cached_paths_mismatch");
+  }
+  const tree = await stagedTree(manifest, dependencies, preflight.gitInvocation);
+  if (tree !== expectedTree) fail("race_index_changed");
+}
+
+function rawCommitMessage(buffer) {
+  const separator = buffer.indexOf(Buffer.from("\n\n"));
+  if (separator < 0) fail("commit_object_malformed");
+  return buffer.subarray(separator + 2);
+}
+
+async function verifyCommittedCandidate(
+  manifest,
+  dependencies,
+  preflight,
+  candidateState,
+  expectedTree,
+) {
+  const targetDirectory = manifest.route.targetDirectory;
+  const gitInvocation = preflight.gitInvocation;
+  const headResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-parse", "HEAD"],
+    { purpose: "verify-head" },
+  );
+  const candidateHead = exactGitLine(headResult.stdout);
+  const parentResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-parse", "HEAD^"],
+    { purpose: "verify-parent" },
+  );
+  const parent = exactGitLine(parentResult.stdout);
+  if (parent !== manifest.baseline.head) fail("commit_parent_mismatch");
+  const parentsResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-list", "--parents", "--max-count=1", "HEAD"],
+    { purpose: "verify-parents" },
+  );
+  const parentTokens = exactGitLine(parentsResult.stdout).split(" ");
+  if (
+    parentTokens.length !== 2 ||
+    parentTokens[0] !== candidateHead ||
+    parentTokens[1] !== manifest.baseline.head
+  ) {
+    fail("commit_parent_mismatch");
+  }
+  const countResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-list", "--count", `${manifest.baseline.head}..HEAD`],
+    { purpose: "verify-count" },
+  );
+  if (exactGitLine(countResult.stdout) !== "1") fail("commit_count_mismatch");
+
+  const treeResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["rev-parse", "HEAD^{tree}"],
+    { purpose: "verify-tree" },
+  );
+  const tree = exactGitLine(treeResult.stdout);
+  if (tree !== expectedTree) fail("commit_tree_mismatch");
+
+  const pathsResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    [
+      "diff-tree",
+      "--no-commit-id",
+      "--name-only",
+      "-z",
+      "--no-renames",
+      "-r",
+      "HEAD",
+    ],
+    { purpose: "verify-paths" },
+  );
+  const changedPaths = parseNulPathList(
+    pathsResult.stdout,
+    "commit_paths_malformed",
+  ).sort(compareStrings);
+  if (!statesEqual(changedPaths, manifest.commit.candidatePaths)) {
+    fail("commit_paths_mismatch");
+  }
+
+  const commitResult = await runGitCommand(
+    dependencies,
+    gitInvocation,
+    targetDirectory,
+    ["cat-file", "commit", "HEAD"],
+    {
+      purpose: "verify-message",
+      maxStdoutBytes: MAX_COMMIT_MESSAGE_BYTES + 64 * 1024,
+    },
+  );
+  const actualMessage = rawCommitMessage(commitResult.stdout);
+  const expectedMessage = Buffer.from(manifest.commit.message, "utf8");
+  if (
+    actualMessage.length !== expectedMessage.length ||
+    !timingSafeEqual(actualMessage, expectedMessage)
+  ) {
+    fail("commit_message_mismatch");
+  }
+
+  const state = await captureRepositoryState(
+    manifest,
+    dependencies,
+    gitInvocation,
+  );
+  if (
+    state.branch !== manifest.baseline.branch ||
+    state.head !== candidateHead ||
+    !state.indexEmpty ||
+    !statesEqual(state.status, manifest.baseline.status) ||
+    !statesEqual(state.ownedPathHashes, candidateState.ownedPathHashes)
+  ) {
+    fail("commit_post_state_mismatch");
+  }
+  const baselineDirtyPathHashes = await inspectPathHashes(
+    manifest.route.targetDirectory,
+    manifest.baseline.dirtyPathHashes.map((entry) => entry.path),
+    dependencies,
+  );
+  if (!statesEqual(baselineDirtyPathHashes, manifest.baseline.dirtyPathHashes)) {
+    fail("commit_post_state_mismatch");
+  }
+  return { head: candidateHead, parent, tree, paths: changedPaths };
+}
+
+async function sealCandidate(
+  manifest,
+  dependencies,
+  preflight,
+  candidateState,
+  summary,
+) {
+  await writeAndVerifyCommitMessage(manifest, dependencies);
+  await rejectCustomFilters(manifest, dependencies, preflight.gitInvocation);
+  await dependencies.onCheckpoint("before-stage-reverify", {
+    manifest,
+    summary,
+  });
+  let beforeStage;
+  try {
+    beforeStage = await assessWorkerDelta(manifest, dependencies, preflight);
+  } catch (error) {
+    const classification = launcherClassification(error);
+    const raceClassification = {
+      worker_branch_changed: "race_branch_changed",
+      worker_head_changed: "race_head_changed",
+      worker_index_changed: "race_index_changed",
+      worker_baseline_dirty_changed: "race_baseline_dirty_changed",
+      worker_baseline_status_changed: "race_status_changed",
+      worker_delta_out_of_contract: "race_status_changed",
+      worker_delta_mismatch: "race_status_changed",
+    }[classification];
+    fail(raceClassification ?? classification);
+  }
+  if (
+    candidateStateFingerprint(beforeStage) !==
+    candidateStateFingerprint(candidateState)
+  ) {
+    fail("race_candidate_changed_before_stage");
+  }
+  await verifyEmptyHooksDirectory(manifest, dependencies);
+
+  summary.recovery.classification = "failed_after_stage";
+  summary.recovery.stageAttempted = true;
+  for (const candidatePath of manifest.commit.candidatePaths) {
+    await runGitCommand(
+      dependencies,
+      preflight.gitInvocation,
+      manifest.route.targetDirectory,
+      ["add", "--all", "--", candidatePath],
+      { purpose: `stage:${candidatePath}`, writeOperation: true },
+    );
+  }
+  await dependencies.onCheckpoint("after-stage", { manifest, summary });
+  const cached = await cachedPaths(manifest, dependencies, preflight.gitInvocation);
+  if (!statesEqual(cached, manifest.commit.candidatePaths)) {
+    fail("cached_paths_mismatch");
+  }
+  const diffCheck = await runGitCommand(
+    dependencies,
+    preflight.gitInvocation,
+    manifest.route.targetDirectory,
+    ["diff", "--cached", "--check", "--no-ext-diff", "HEAD", "--"],
+    {
+      purpose: "cached-diff-check",
+      acceptedExitCodes: [0, 1, 2],
+    },
+  );
+  if (diffCheck.exitCode !== 0) fail("cached_diff_check_failed");
+  const expectedTree = await stagedTree(
+    manifest,
+    dependencies,
+    preflight.gitInvocation,
+  );
+
+  await dependencies.onCheckpoint("before-commit-reverify", {
+    manifest,
+    summary,
+  });
+  await verifyEmptyHooksDirectory(manifest, dependencies);
+  await verifyStagedCandidate(
+    manifest,
+    dependencies,
+    preflight,
+    candidateState,
+    expectedTree,
+  );
+
+  const commitResult = await runGitCommand(
+    dependencies,
+    preflight.gitInvocation,
+    manifest.route.targetDirectory,
+    [
+      "-c",
+      `core.hooksPath=${manifest.artifacts.hooksDirectory}`,
+      "-c",
+      "commit.gpgSign=false",
+      "-c",
+      "tag.gpgSign=false",
+      "commit",
+      "--no-gpg-sign",
+      "--cleanup=verbatim",
+      "--file",
+      manifest.artifacts.messagePath,
+    ],
+    {
+      purpose: "commit",
+      acceptedExitCodes: [0, 1, 128],
+      writeOperation: true,
+    },
+  );
+  if (commitResult.exitCode !== 0) {
+    const headAfterFailure = await runGitCommand(
+      dependencies,
+      preflight.gitInvocation,
+      manifest.route.targetDirectory,
+      ["rev-parse", "HEAD"],
+      { purpose: "commit-failure-head" },
+    );
+    if (exactGitLine(headAfterFailure.stdout) !== manifest.baseline.head) {
+      summary.recovery.classification = "failed_after_commit";
+      summary.recovery.commitCreated = true;
+      fail("commit_failed_after_head_move");
+    }
+    fail("commit_failed");
+  }
+  summary.recovery.classification = "failed_after_commit";
+  summary.recovery.commitCreated = true;
+  await dependencies.onCheckpoint("after-commit", { manifest, summary });
+  const candidate = await verifyCommittedCandidate(
+    manifest,
+    dependencies,
+    preflight,
+    candidateState,
+    expectedTree,
+  );
+  summary.recovery.classification = "not_needed";
+  return candidate;
+}
+
+async function removeAndVerifyExactDirectory(targetPath, dependencies) {
+  try {
+    await dependencies.rm(targetPath, { recursive: true, force: false });
+  } catch (error) {
+    if (error?.code !== "ENOENT") return false;
+  }
+  try {
+    const information = await pathInformation(targetPath, dependencies.lstat);
+    return !information.exists;
+  } catch {
+    return false;
+  }
+}
+
+async function cleanupWriterRuntime(
+  manifest,
+  dependencies,
+  summary,
+  {
+    invocation,
+    sessionId,
+    workerLaunched,
+    processQuiescent,
+    runtimeDirectoryCreated,
+  },
+) {
+  const failures = [];
+  const environment = buildWriterChildEnvironment(
+    manifest,
+    dependencies.environment,
+  );
+  if (!processQuiescent) {
+    summary.cleanup.session = "blocked-process-unknown";
+    summary.cleanup.evidence = {
+      path: manifest.artifacts.evidencePath,
+      state: "blocked-process-unknown",
+      verified: false,
+    };
+    summary.cleanup.temporaryDirectory = {
+      path: manifest.artifacts.temporaryDirectory,
+      state: runtimeDirectoryCreated ? "retained-process-unknown" : "not-created",
+      verified: !runtimeDirectoryCreated,
+    };
+    summary.cleanup.message = {
+      path: manifest.artifacts.messagePath,
+      state: runtimeDirectoryCreated ? "retained-process-unknown" : "not-created",
+      verified: !runtimeDirectoryCreated,
+    };
+    summary.cleanup.hooksDirectory = {
+      path: manifest.artifacts.hooksDirectory,
+      state: runtimeDirectoryCreated ? "retained-process-unknown" : "not-created",
+      verified: !runtimeDirectoryCreated,
+    };
+    summary.cleanup.manifest = {
+      path: manifest.artifacts.manifestPath,
+      state: "retained-process-unknown",
+      verified: false,
+    };
+    return failures;
+  }
+
+  if (!workerLaunched) {
+    summary.cleanup.session = "not-created";
+    summary.session = { id: null, state: "not-created", absenceVerified: true };
+  } else if (!sessionId || !invocation) {
+    summary.cleanup.session = "unknown";
+    failures.push("session_cleanup_failed");
+  } else {
+    let deleteResult;
+    let absenceResult;
+    let cleanupProcessUnknown = false;
+    try {
+      deleteResult = normalizeProcessResult(
+        await dependencies.runWorkerProcess({
+          purpose: "session-delete",
+          command: invocation.command,
+          args: [...invocation.prefixArgs, "session", "delete", sessionId],
+          cwd: manifest.route.targetDirectory,
+          env: environment,
+          timeoutMs: Math.min(manifest.timeoutMs, 30_000),
+          captureStdout: false,
+        }),
+      );
+      if (!processEnded(deleteResult)) {
+        cleanupProcessUnknown = true;
+      } else {
+        absenceResult = normalizeProcessResult(
+          await dependencies.runWorkerProcess({
+            purpose: "session-absence-export",
+            command: invocation.command,
+            args: [
+              ...invocation.prefixArgs,
+              "export",
+              sessionId,
+              "--sanitize",
+            ],
+            cwd: manifest.route.targetDirectory,
+            env: environment,
+            timeoutMs: Math.min(manifest.timeoutMs, 30_000),
+            captureStdout: true,
+            maxStdoutBytes: MAX_CAPTURED_STDOUT_BYTES,
+          }),
+        );
+        if (!processEnded(absenceResult)) cleanupProcessUnknown = true;
+      }
+    } catch {
+      cleanupProcessUnknown = true;
+    }
+    if (cleanupProcessUnknown) {
+      deleteResult?.stdout.fill(0);
+      deleteResult?.stderr.fill(0);
+      absenceResult?.stdout.fill(0);
+      absenceResult?.stderr.fill(0);
+      summary.cleanup.session = "blocked-process-unknown";
+      summary.session = { id: sessionId, state: "unknown", absenceVerified: false };
+      summary.cleanup.evidence = {
+        path: manifest.artifacts.evidencePath,
+        state: "retained-process-unknown",
+        verified: false,
+      };
+      summary.cleanup.temporaryDirectory = {
+        path: manifest.artifacts.temporaryDirectory,
+        state: "retained-process-unknown",
+        verified: false,
+      };
+      summary.cleanup.message = {
+        path: manifest.artifacts.messagePath,
+        state: "retained-process-unknown",
+        verified: false,
+      };
+      summary.cleanup.hooksDirectory = {
+        path: manifest.artifacts.hooksDirectory,
+        state: "retained-process-unknown",
+        verified: false,
+      };
+      summary.cleanup.manifest = {
+        path: manifest.artifacts.manifestPath,
+        state: "retained-process-unknown",
+        verified: false,
+      };
+      return ["cleanup_process_state_unknown"];
+    }
+    const absenceVerified = Boolean(
+      deleteResult &&
+        absenceResult &&
+        processEnded(deleteResult) &&
+        processEnded(absenceResult) &&
+        !deleteResult.timedOut &&
+        deleteResult.exitCode === 0 &&
+        !absenceResult.timedOut &&
+        absenceResult.exitCode !== 0 &&
+        (outputProvesMissingSession(absenceResult.stderr, sessionId) ||
+          outputProvesMissingSession(absenceResult.stdout, sessionId)),
+    );
+    deleteResult?.stdout.fill(0);
+    deleteResult?.stderr.fill(0);
+    absenceResult?.stdout.fill(0);
+    absenceResult?.stderr.fill(0);
+    if (absenceVerified) {
+      summary.cleanup.session = "deleted";
+      summary.session = { id: sessionId, state: "deleted", absenceVerified: true };
+    } else {
+      summary.cleanup.session = "failed";
+      summary.session = { id: sessionId, state: "unknown", absenceVerified: false };
+      if (!failures.includes("session_cleanup_failed")) {
+        failures.push("session_cleanup_failed");
+      }
+    }
+  }
+
+  let temporaryRemoved = true;
+  if (!runtimeDirectoryCreated) {
+    for (const [summaryField, artifactField] of [
+      ["temporaryDirectory", "temporaryDirectory"],
+      ["evidence", "evidencePath"],
+      ["message", "messagePath"],
+      ["hooksDirectory", "hooksDirectory"],
+    ]) {
+      const information = await pathInformation(
+        manifest.artifacts[artifactField],
+        dependencies.lstat,
+      );
+      summary.cleanup[summaryField] = {
+        path: manifest.artifacts[artifactField],
+        state: information.exists ? "pre-existing-unowned" : "not-created",
+        verified: true,
+      };
+    }
+  } else {
+    if (manifest.cleanup.temporaryDirectory) {
+      temporaryRemoved = await removeAndVerifyExactDirectory(
+        manifest.artifacts.temporaryDirectory,
+        dependencies,
+      );
+      if (!temporaryRemoved) failures.push("temporary_cleanup_failed");
+    }
+    summary.cleanup.temporaryDirectory = {
+      path: manifest.artifacts.temporaryDirectory,
+      state: temporaryRemoved ? "deleted" : "failed",
+      verified: temporaryRemoved,
+    };
+    for (const [summaryField, artifactField] of [
+      ["evidence", "evidencePath"],
+      ["message", "messagePath"],
+      ["hooksDirectory", "hooksDirectory"],
+    ]) {
+      summary.cleanup[summaryField] = {
+        path: manifest.artifacts[artifactField],
+        state: temporaryRemoved
+          ? "deleted-with-temporary-directory"
+          : "retained-cleanup-failed",
+        verified: temporaryRemoved,
+      };
+    }
+  }
+
+  let manifestRemoved = false;
+  if (failures.length === 0 && manifest.cleanup.manifest) {
+    manifestRemoved = await removeAndVerifyExactFile(
+      manifest.artifacts.manifestPath,
+      dependencies,
+    );
+    if (!manifestRemoved) failures.push("manifest_cleanup_failed");
+  }
+  summary.cleanup.manifest = {
+    path: manifest.artifacts.manifestPath,
+    state: manifestRemoved
+      ? "deleted"
+      : failures.length > 0
+        ? "retained-cleanup-failed"
+        : "retained",
+    verified: manifestRemoved || !manifest.cleanup.manifest,
+  };
+  return failures;
+}
+
 function collectSessionIds(event) {
   const candidates = [
     event.sessionID,
@@ -1077,6 +3247,67 @@ function assessEvidence(parsed, manifest) {
   });
 
   return { failures, report, expectations };
+}
+
+function assessWriterEvidence(parsed, manifest) {
+  const failures = [];
+  const add = (code) => {
+    if (!failures.includes(code)) failures.push(code);
+  };
+  if (parsed.errors.length > 0) add("evidence_malformed");
+  if (parsed.sessionIds.length !== 1) add("session_identity_invalid");
+  if (parsed.typeCounts.error > 0) add("runtime_error_event");
+  if (parsed.finalReason !== "stop") add("terminal_stop_missing");
+
+  const report = parseWorkerReport(parsed.workerText);
+  if (
+    report.headings.length !== manifest.expected.headings.length ||
+    report.headings.some(
+      (heading, index) => heading !== manifest.expected.headings[index],
+    )
+  ) {
+    add("worker_headings_invalid");
+  }
+  if (report.status !== manifest.expected.workerStatus) {
+    add("worker_status_mismatch");
+  }
+  if (report.status !== "done") add("worker_not_done");
+
+  const mutations = manifest.expected.mutations.map((expectation) => {
+    const relevant = parsed.toolEvents.filter(
+      (event) =>
+        event.tool === expectation.tool &&
+        event.input !== null &&
+        isSubset(expectation.input, event.input),
+    );
+    const mutationCompleted = (event) =>
+      event.status !== null && toolEventCompleted(event.status);
+    const matched = relevant.filter(mutationCompleted).length;
+    if (relevant.some((event) => !mutationCompleted(event))) {
+      add("mutation_event_failed");
+    }
+    if (matched < expectation.minimum) add("required_mutation_missing");
+    return {
+      tool: expectation.tool,
+      required: expectation.minimum,
+      matched,
+    };
+  });
+  if (
+    parsed.toolEvents.some(
+      (event) =>
+        !toolEventCompleted(event.status) &&
+        !manifest.expected.mutations.some(
+          (expectation) =>
+            event.tool === expectation.tool &&
+            event.input !== null &&
+            isSubset(expectation.input, event.input),
+        ),
+    )
+  ) {
+    add("tool_event_failed");
+  }
+  return { failures, report, mutations };
 }
 
 function safeRouteIdentity(value) {
@@ -1248,6 +3479,7 @@ function emptyEventSummary() {
       other: 0,
     },
     tools: [],
+    mutations: [],
     workerStatus: null,
     terminalReason: null,
     headingsValid: false,
@@ -1255,6 +3487,7 @@ function emptyEventSummary() {
 }
 
 function initialSummary(manifest = null, manifestPath = null) {
+  const evidencePath = manifest?.artifacts?.evidencePath ?? manifest?.evidencePath ?? null;
   return {
     schema: RESULT_SCHEMA_ID,
     status: "blocked",
@@ -1282,13 +3515,34 @@ function initialSummary(manifest = null, manifestPath = null) {
     cleanup: {
       session: "not-created",
       evidence: manifest
-        ? { path: manifest.evidencePath, state: "not-created", verified: true }
+        ? { path: evidencePath, state: "not-created", verified: true }
         : { path: null, state: "unknown", verified: false },
       manifest: {
         path: manifestPath,
         state: manifestPath ? "retained" : "unknown",
         verified: Boolean(manifestPath),
       },
+      temporaryDirectory: manifest?.artifacts
+        ? {
+            path: manifest.artifacts.temporaryDirectory,
+            state: "not-created",
+            verified: true,
+          }
+        : null,
+      message: manifest?.artifacts
+        ? {
+            path: manifest.artifacts.messagePath,
+            state: "not-created",
+            verified: true,
+          }
+        : null,
+      hooksDirectory: manifest?.artifacts
+        ? {
+            path: manifest.artifacts.hooksDirectory,
+            state: "not-created",
+            verified: true,
+          }
+        : null,
     },
     policy: manifest
       ? { identity: manifest.policy.identity, proof: manifest.policy.proof }
@@ -1349,19 +3603,43 @@ function validateResolvedInvocation(invocation) {
   return invocation;
 }
 
+function validateResolvedGitInvocation(invocation) {
+  if (
+    !isRecord(invocation) ||
+    !isAbsolutePath(invocation.command) ||
+    !Array.isArray(invocation.prefixArgs) ||
+    invocation.prefixArgs.length !== 0 ||
+    !GIT_INVOCATION_KINDS.includes(invocation.kind)
+  ) {
+    fail("git_resolution_invalid");
+  }
+  return invocation;
+}
+
 export function createLauncherDependencies(overrides = {}) {
   const dependencies = {
     platform: process.platform,
     environment: process.env,
+    processStateUnknown: false,
     access: nodeAccess,
     lstat: nodeLstat,
+    mkdir: nodeMkdir,
     open: nodeOpen,
+    readdir: nodeReaddir,
     readFile: nodeReadFile,
+    realpath: nodeRealpath,
+    rm: nodeRm,
     unlink: nodeUnlink,
+    writeFile: nodeWriteFile,
     spawn: nodeSpawn,
     terminateProcessTree: undefined,
+    resolveGit: undefined,
     resolveOpenCode: undefined,
+    onCheckpoint: async () => {},
+    runGitProcess: undefined,
     runProcess: undefined,
+    runValidationProcess: undefined,
+    runWorkerProcess: undefined,
     ...overrides,
   };
   dependencies.resolveOpenCode ??= () =>
@@ -1370,12 +3648,541 @@ export function createLauncherDependencies(overrides = {}) {
       environment: dependencies.environment,
       access: dependencies.access,
     });
+  dependencies.resolveGit ??= () =>
+    resolveGitInvocation({
+      platform: dependencies.platform,
+      environment: dependencies.environment,
+      access: dependencies.access,
+      lstat: dependencies.lstat,
+    });
   dependencies.runProcess ??= (specification) =>
     executeProcess(specification, dependencies);
+  dependencies.runGitProcess ??= dependencies.runProcess;
+  dependencies.runValidationProcess ??= dependencies.runProcess;
+  dependencies.runWorkerProcess ??= dependencies.runProcess;
   return dependencies;
 }
 
-export async function runExternalAgent(
+export async function classifyMissingSummaryRecovery(
+  manifest,
+  dependencyOverrides = {},
+) {
+  const result = {
+    classification: "ambiguous_stop",
+    baselineHead: manifest?.baseline?.head ?? null,
+    head: null,
+    candidate: null,
+    actionNeeded: "stop without cleanup or history rewriting",
+  };
+  try {
+    validateManifest(manifest, {
+      manifestPath: manifest.artifacts.manifestPath,
+    });
+    const dependencies = createLauncherDependencies(dependencyOverrides);
+    const gitInvocation = validateResolvedGitInvocation(
+      await dependencies.resolveGit(),
+    );
+    const state = await captureRepositoryState(
+      manifest,
+      dependencies,
+      gitInvocation,
+    );
+    result.head = state.head;
+    if (state.branch !== manifest.baseline.branch || !state.indexEmpty) return result;
+    const baselineDirtyPathHashes = await inspectPathHashes(
+      manifest.route.targetDirectory,
+      manifest.baseline.dirtyPathHashes.map((entry) => entry.path),
+      dependencies,
+    );
+    if (!statesEqual(baselineDirtyPathHashes, manifest.baseline.dirtyPathHashes)) {
+      return result;
+    }
+
+    if (state.head === manifest.baseline.head) {
+      let deltaEntries;
+      try {
+        deltaEntries = subtractStatusEntries(
+          state.status,
+          manifest.baseline.status,
+        );
+      } catch {
+        return result;
+      }
+      const deltaPaths = [...new Set(statusPaths(deltaEntries))].sort(compareStrings);
+      if (
+        deltaEntries.some(
+          (entry) => entry.kind === "unmerged" || (entry.xy && entry.xy[0] !== "."),
+        ) ||
+        deltaPaths.some((relativePath) => !manifest.ownedPaths.includes(relativePath))
+      ) {
+        return result;
+      }
+      result.classification = "no_candidate_sealed";
+      result.actionNeeded =
+        "audit the confined owned edits before deciding on a fresh dispatch";
+      return result;
+    }
+
+    if (!statesEqual(state.status, manifest.baseline.status)) return result;
+    const targetDirectory = manifest.route.targetDirectory;
+    const parentResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      ["rev-parse", "HEAD^"],
+      { purpose: "recovery-parent" },
+    );
+    if (exactGitLine(parentResult.stdout) !== manifest.baseline.head) return result;
+    const parentsResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      ["rev-list", "--parents", "--max-count=1", "HEAD"],
+      { purpose: "recovery-parents" },
+    );
+    const parentTokens = exactGitLine(parentsResult.stdout).split(" ");
+    if (
+      parentTokens.length !== 2 ||
+      parentTokens[0] !== state.head ||
+      parentTokens[1] !== manifest.baseline.head
+    ) {
+      return result;
+    }
+    const countResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      ["rev-list", "--count", `${manifest.baseline.head}..HEAD`],
+      { purpose: "recovery-count" },
+    );
+    if (exactGitLine(countResult.stdout) !== "1") return result;
+    const pathsResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      [
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "-r",
+        "HEAD",
+      ],
+      { purpose: "recovery-paths" },
+    );
+    const changedPaths = parseNulPathList(
+      pathsResult.stdout,
+      "recovery_paths_malformed",
+    ).sort(compareStrings);
+    if (!statesEqual(changedPaths, manifest.commit.candidatePaths)) return result;
+    const commitResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      ["cat-file", "commit", "HEAD"],
+      {
+        purpose: "recovery-message",
+        maxStdoutBytes: MAX_COMMIT_MESSAGE_BYTES + 64 * 1024,
+      },
+    );
+    const message = rawCommitMessage(commitResult.stdout);
+    const expectedMessage = Buffer.from(manifest.commit.message, "utf8");
+    if (
+      message.length !== expectedMessage.length ||
+      !timingSafeEqual(message, expectedMessage)
+    ) {
+      return result;
+    }
+    const treeResult = await runGitCommand(
+      dependencies,
+      gitInvocation,
+      targetDirectory,
+      ["rev-parse", "HEAD^{tree}"],
+      { purpose: "recovery-tree" },
+    );
+    result.classification = "candidate_sealed_requires_audit";
+    result.candidate = {
+      head: state.head,
+      parent: manifest.baseline.head,
+      tree: exactGitLine(treeResult.stdout),
+      paths: changedPaths,
+    };
+    result.actionNeeded =
+      "independently audit the exact candidate and runtime cleanup before acceptance";
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+async function captureRecoveryCheckout(manifest, dependencies, preflight) {
+  const state = await captureRepositoryState(
+    manifest,
+    dependencies,
+    preflight.gitInvocation,
+  );
+  let cached = [];
+  if (!state.indexEmpty) {
+    cached = await cachedPaths(manifest, dependencies, preflight.gitInvocation);
+  }
+  return {
+    branch: state.branch,
+    head: state.head,
+    indexEmpty: state.indexEmpty,
+    indexSha256: state.index.sha256,
+    status: state.status,
+    cachedPaths: cached,
+    ownedPathHashes: state.ownedPathHashes,
+    dirtyPathHashes: state.dirtyPathHashes,
+  };
+}
+
+async function runWriterExternalAgent(
+  manifest,
+  { manifestPath },
+  dependencyOverrides = {},
+) {
+  const dependencies = createLauncherDependencies(dependencyOverrides);
+  const summary = initialSummary(manifest, manifestPath);
+  const failures = [];
+  const add = (code) => {
+    if (!failures.includes(code)) failures.push(code);
+  };
+  summary.recovery = {
+    classification: "failed_before_stage",
+    stageAttempted: false,
+    commitCreated: false,
+  };
+  let preflight = null;
+  let invocation = null;
+  let sessionId = null;
+  let processQuiescent = true;
+  let candidateState = null;
+  let runtimeDirectoryCreated = false;
+  let workerLaunched = false;
+  try {
+    preflight = await preflightWriter(manifest, dependencies);
+    summary.process.gitInvocationKind = preflight.gitInvocation.kind;
+
+    try {
+      await dependencies.mkdir(manifest.artifacts.temporaryDirectory, {
+        recursive: false,
+        mode: 0o700,
+      });
+      runtimeDirectoryCreated = true;
+      await dependencies.mkdir(manifest.artifacts.hooksDirectory, {
+        recursive: false,
+        mode: 0o700,
+      });
+    } catch (error) {
+      if (error?.code === "EEXIST") fail("artifact_path_exists");
+      throw error;
+    }
+    const hooks = await pathInformation(
+      manifest.artifacts.hooksDirectory,
+      dependencies.lstat,
+    );
+    if (
+      !hooks.exists ||
+      !hooks.stat.isDirectory() ||
+      hooks.stat.isSymbolicLink() ||
+      (await dependencies.readdir(manifest.artifacts.hooksDirectory)).length !== 0
+    ) {
+      fail("hooks_directory_not_empty");
+    }
+    summary.cleanup.temporaryDirectory = {
+      path: manifest.artifacts.temporaryDirectory,
+      state: "created",
+      verified: true,
+    };
+
+    invocation = validateResolvedInvocation(await dependencies.resolveOpenCode());
+    const environment = buildWriterChildEnvironment(
+      manifest,
+      dependencies.environment,
+    );
+    workerLaunched = true;
+    let workerProcessResult;
+    try {
+      workerProcessResult = await dependencies.runWorkerProcess({
+        purpose: "worker-run",
+        command: invocation.command,
+        args: [...invocation.prefixArgs, ...buildRunArguments(manifest)],
+        cwd: manifest.route.targetDirectory,
+        env: environment,
+        timeoutMs: manifest.timeoutMs,
+        stdoutPath: manifest.artifacts.evidencePath,
+        captureStdout: false,
+      });
+    } catch (error) {
+      processQuiescent = false;
+      dependencies.processStateUnknown = true;
+      throw error;
+    }
+    const runResult = normalizeProcessResult(workerProcessResult);
+    summary.process = {
+      invocationKind: invocation.kind,
+      gitInvocationKind: preflight.gitInvocation.kind,
+      exitCode: runResult.exitCode,
+      timedOut: runResult.timedOut,
+      stderrBytes: runResult.stderrBytes,
+      stderrOmitted: true,
+    };
+    processQuiescent = processEnded(runResult);
+    if (!processQuiescent) {
+      dependencies.processStateUnknown = true;
+      add("process_state_unknown");
+    }
+    if (runResult.processState === "not-started") add("runtime_launch_failed");
+    if (runResult.timedOut) add("runtime_timeout");
+    if (runResult.exitCode !== 0 && !runResult.timedOut) add("runtime_exit_nonzero");
+
+    if (processQuiescent) {
+      try {
+        const evidenceText = await readEvidence(
+          manifest.artifacts.evidencePath,
+          dependencies,
+        );
+        const parsed = parseNdjsonEvidence(evidenceText);
+        const assessment = assessWriterEvidence(parsed, manifest);
+        assessment.failures.forEach(add);
+        sessionId =
+          parsed.sessionIds.length === 1 && SAFE_SESSION_ID.test(parsed.sessionIds[0])
+            ? parsed.sessionIds[0]
+            : null;
+        if (!sessionId) add("session_identity_invalid");
+        summary.session = {
+          id: sessionId,
+          state: sessionId ? "created" : "unknown",
+          absenceVerified: false,
+        };
+        summary.events = {
+          counts: parsed.typeCounts,
+          tools: [],
+          mutations: assessment.mutations,
+          workerStatus: assessment.report.status,
+          terminalReason: parsed.finalReason,
+          headingsValid:
+            assessment.report.headings.length === AIRLOCK_HEADINGS.length &&
+            assessment.report.headings.every(
+              (heading, index) => heading === AIRLOCK_HEADINGS[index],
+            ),
+        };
+      } catch (error) {
+        add(launcherClassification(error));
+      }
+    }
+
+    if (processQuiescent && sessionId) {
+      const exportResult = normalizeProcessResult(
+        await dependencies.runWorkerProcess({
+          purpose: "effective-identity-export",
+          command: invocation.command,
+          args: [
+            ...invocation.prefixArgs,
+            "export",
+            sessionId,
+            "--sanitize",
+          ],
+          cwd: manifest.route.targetDirectory,
+          env: environment,
+          timeoutMs: Math.min(manifest.timeoutMs, 30_000),
+          captureStdout: true,
+          maxStdoutBytes: MAX_CAPTURED_STDOUT_BYTES,
+        }),
+      );
+      if (!processEnded(exportResult)) {
+        processQuiescent = false;
+        dependencies.processStateUnknown = true;
+        add("process_state_unknown");
+      }
+      let identity = null;
+      if (
+        exportResult.exitCode === 0 &&
+        !exportResult.timedOut &&
+        exportResult.terminationConfirmed &&
+        !exportResult.stdoutTruncated
+      ) {
+        identity = parseSanitizedExportIdentity(exportResult.stdout);
+      }
+      exportResult.stdout.fill(0);
+      exportResult.stderr.fill(0);
+      if (!identity) add("effective_identity_unproven");
+      else if (
+        identity.provider !== manifest.expected.effectiveIdentity.provider ||
+        identity.model !== manifest.expected.effectiveIdentity.model ||
+        (identity.agent && identity.agent !== manifest.route.agent) ||
+        (identity.variant && identity.variant !== manifest.route.variant)
+      ) {
+        add("effective_identity_mismatch");
+      } else {
+        summary.effectiveRoute = {
+          runtime: "opencode",
+          agent: identity.agent ?? manifest.route.agent,
+          provider: identity.provider,
+          model: identity.model,
+          variant: identity.variant ?? manifest.route.variant,
+          proof: "sanitized-export+argument-array",
+        };
+      }
+    }
+
+    if (processQuiescent) {
+      try {
+        candidateState = await assessWorkerDelta(
+          manifest,
+          dependencies,
+          preflight,
+        );
+        summary.candidate = {
+          baselineHead: manifest.baseline.head,
+          head: candidateState.head,
+          paths: candidateState.candidatePaths,
+          commit: null,
+          tree: null,
+        };
+      } catch (error) {
+        add(launcherClassification(error));
+      }
+    }
+
+    const priorities = [
+      "process_state_unknown",
+      "runtime_timeout",
+      "runtime_exit_nonzero",
+      "runtime_launch_failed",
+      "worker_not_done",
+      "worker_status_mismatch",
+      "worker_headings_invalid",
+      "mutation_event_failed",
+      "required_mutation_missing",
+      "tool_event_failed",
+      "effective_identity_mismatch",
+      "effective_identity_unproven",
+      "session_identity_invalid",
+      "worker_branch_changed",
+      "worker_head_changed",
+      "worker_index_changed",
+      "worker_baseline_dirty_changed",
+      "worker_baseline_status_changed",
+      "worker_delta_out_of_contract",
+      "worker_delta_mismatch",
+      "evidence_file_invalid",
+      "evidence_malformed",
+      "terminal_stop_missing",
+      "runtime_error_event",
+      "validation_process_state_unknown",
+      "validation_created_delta",
+      "validation_timeout",
+      "validation_output_limit",
+      "validation_exit_nonzero",
+      "validation_executable_invalid",
+      "validation_working_directory_invalid",
+    ];
+    const select = () =>
+      priorities.find((classification) => failures.includes(classification)) ??
+      failures[0];
+    if (!select() && candidateState) {
+      try {
+        summary.validations = await runDeterministicValidations(
+          manifest,
+          dependencies,
+          preflight,
+          candidateState,
+        );
+      } catch (error) {
+        add(launcherClassification(error));
+      }
+    }
+    if (!select() && candidateState) {
+      try {
+        const sealed = await sealCandidate(
+          manifest,
+          dependencies,
+          preflight,
+          candidateState,
+          summary,
+        );
+        summary.candidate = {
+          baselineHead: manifest.baseline.head,
+          head: sealed.head,
+          parent: sealed.parent,
+          paths: sealed.paths,
+          commit: sealed.head,
+          tree: sealed.tree,
+        };
+      } catch (error) {
+        add(launcherClassification(error));
+      }
+    }
+    const selected = select();
+    if (selected) {
+      summary.classification = selected;
+      summary.actionNeeded = processQuiescent
+        ? "inspect the confined checkout delta and correct the blocked worker result"
+        : "confirm the exact child process tree is stopped before touching the checkout";
+    } else {
+      summary.status = "done";
+      summary.classification = "complete";
+      summary.actionNeeded = "none";
+    }
+  } catch (error) {
+    summary.classification = launcherClassification(error);
+    summary.actionNeeded =
+      "restore the exact declared baseline and dispatch a fresh hashed manifest";
+  }
+  if (
+    summary.status === "blocked" &&
+    preflight &&
+    processQuiescent &&
+    !dependencies.processStateUnknown
+  ) {
+    try {
+      summary.recovery.checkout = await captureRecoveryCheckout(
+        manifest,
+        dependencies,
+        preflight,
+      );
+    } catch {
+      summary.recovery.checkout = { state: "unknown" };
+    }
+  }
+  let cleanupFailures = [];
+  try {
+    cleanupFailures = await cleanupWriterRuntime(
+      manifest,
+      dependencies,
+      summary,
+      {
+        invocation,
+        sessionId,
+        workerLaunched,
+        processQuiescent:
+          processQuiescent && !dependencies.processStateUnknown,
+        runtimeDirectoryCreated,
+      },
+    );
+  } catch {
+    cleanupFailures = ["writer_cleanup_failed"];
+  }
+  if (cleanupFailures.length > 0) {
+    summary.status = "blocked";
+    if (summary.recovery.commitCreated) {
+      summary.classification = "cleanup_failed_after_commit";
+      summary.recovery.classification = "cleanup_failed_after_commit";
+      summary.actionNeeded =
+        "preserve the candidate commit and remove only the exact declared runtime artifacts";
+    } else if (summary.classification === "complete") {
+      summary.classification = cleanupFailures[0];
+      summary.actionNeeded =
+        "remove only the exact declared runtime artifacts before acceptance";
+    }
+  }
+  return summary;
+}
+
+async function runLegacyExternalAgent(
   manifest,
   { manifestPath },
   dependencyOverrides = {},
@@ -1835,6 +4642,17 @@ export async function runExternalAgent(
     summary.actionNeeded = "none";
   }
   return summary;
+}
+
+export async function runExternalAgent(
+  manifest,
+  { manifestPath },
+  dependencyOverrides = {},
+) {
+  validateManifest(manifest, { manifestPath });
+  return manifest.schema === MANIFEST_SCHEMA_ID
+    ? runWriterExternalAgent(manifest, { manifestPath }, dependencyOverrides)
+    : runLegacyExternalAgent(manifest, { manifestPath }, dependencyOverrides);
 }
 
 function blockedCliSummary(code, manifestPath = null) {

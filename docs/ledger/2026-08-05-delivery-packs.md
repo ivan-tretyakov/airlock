@@ -38,29 +38,42 @@
 
 ### Delivery Pack `AIRLOCK-P03` — External multimodel delegation
 
-- **Lifecycle:** active
-- **Review lifecycle:** not-started
+- **Lifecycle:** failed
+- **Review lifecycle:** in-progress
 - **Acceptance:** installed Airlock 1.3.0 delegates an approved task from a user-selected Claude Opus/Fable orchestrator to the selected OpenCode model, audits its scoped product commit, records the Crossing, and cleans external state.
 - **Crossings:** planned 1–4, contiguous
 - **Dependencies:** accepted `AIRLOCK-P01`, `AIRLOCK-P02`; installed Claude Code/OpenCode and configured model providers
 - **Multi-Crossing reason:** canonical semantics, OpenCode worker, Claude bridge, and release activation are independently auditable layers of one outcome.
 - **Rollback strategy:** disable/remove the global worker, revert activation, then host and canonical changes in reverse order.
-- **Repairs:** none; user-requested capability 2026-08-06
-- **Current candidate:** base `819ce33` + product-diff hash `439b8b0324747e831282e6554cb62238a2931797`
+- **Repairs:** `AIRLOCK-P04`; installed writer gate exposed nondeterministic model-owned Git choreography
+- **Current candidate:** commit `0c441c248aa012f7669b11240784c1e910d60fda`, tree `6c5e2f63fc21c53899182e668dbba730aa942209`
+- **Accepted candidate:** none
+
+### Delivery Pack `AIRLOCK-P04` — Deterministic external candidate sealing
+
+- **Lifecycle:** active
+- **Review lifecycle:** not-started
+- **Acceptance:** installed Airlock 1.3.1 delegates one exact writer task to OpenCode, deterministically validates and seals its scoped candidate, passes independent Claude audit, and removes exact external state.
+- **Crossings:** planned 1–4, contiguous
+- **Dependencies:** P03 C01–C03 source; failed P03 C04 installed writer evidence; approved P04 design and plan
+- **Multi-Crossing reason:** launcher safety core, workflow adoption, release source, and installed activation are independently auditable layers of one repair.
+- **Rollback strategy:** disable/remove 1.3.1 activation and the global worker, then revert C03, C02, and C01 in reverse order without rewriting external or user history.
+- **Repairs:** `AIRLOCK-D02`; user-approved architecture reversal 2026-08-06
+- **Current candidate:** base `0c441c248aa012f7669b11240784c1e910d60fda` + staged product-diff hash `e5429cc67bb16b1c43eb7790f102b2161713a122`
 - **Accepted candidate:** none
 
 ## Resume checkpoint
 
 - **State:** active
 - **Updated:** 2026-08-06
-- **Active pack / Crossing:** `AIRLOCK-P03` / `AIRLOCK-P03-C03` ready to commit
-- **Completed:** C03 implementation, debug repair, G16/G18, cleanup, and staged-diff audit complete
-- **Changed paths:** C03 launcher/tests, Claude agents, root/adapter docs, conventions, manifests, process artifacts
-- **Fresh evidence:** `AIRLOCK-E15`, `AIRLOCK-E16`; deterministic source bridge and frozen full candidate have no blocking findings
-- **Blockers / decisions:** none; `AIRLOCK-D01` resolved by approved deterministic-launcher and foreground-return amendments
-- **Retained evidence:** P03 design, plan, and this ledger
-- **Temporary artifacts / processes:** all debug/source-smoke sessions, manifests, NDJSON, and residual zero-byte `.err` file deleted/verified absent; no task-owned process remains
-- **Next action:** commit and push `AIRLOCK-P03-C03`, then update/install 1.3.0 for C04
+- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C01` ready to commit
+- **Completed:** P04 C01 tasks 1–13, exact staged-name audit, product-diff hash, user checkpoint approval, and early different-family review
+- **Changed paths:** staged C01 launcher/tests and P04 design/plan/ledger; historical P03 plan remains preserved, unowned, and unstaged
+- **Fresh evidence:** `node --check scripts/run-external-agent.mjs` passed; `node --test scripts/run-external-agent.test.mjs` passed 77/77 in 119.3s; `git diff --check` passed; `review-glm` approved C01 with no blocking finding
+- **Blockers / decisions:** C01 ready for user checkpoint and ship; built-in Git `text`/`eol` normalization is accepted standard repository behavior rather than overridden, while custom executable filters remain blocked; real OpenCode/Windows proof remains required at G25/G26
+- **Retained evidence:** P03/P04 designs and plans, this ledger, failed installed-run candidate SHA `c5d94cddb9e6122423b91066dba8d18d42cfc7e6`, and concise failed-run evidence in `AIRLOCK-E18`
+- **Temporary artifacts / processes:** exact P03 disposable repos `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-6c54d2c530574b778a3b28c16b26ee21` and `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-d65ab1b7e04d4118b7fdf28aca6a3c8f` remain for exact cleanup; second repo retains `dispatch-final-retained.json`; all reported OpenCode sessions were deleted; no known task-owned process remains
+- **Next action:** commit `AIRLOCK-P04-C01`, verify the commit, then activate C02 tasks 14–22
 
 ## Gate register
 
@@ -82,10 +95,17 @@
 | `AIRLOCK-G14` | `AIRLOCK-P03` | canonical external-runtime consistency | required | passed | — | — | — | `AIRLOCK-E13` |
 | `AIRLOCK-G15` | `AIRLOCK-P03` | OpenCode worker resolution and lifecycle | required | passed | — | — | — | `AIRLOCK-E14` |
 | `AIRLOCK-G16` | `AIRLOCK-P03` | Claude plugin validation | required | passed | — | — | — | `AIRLOCK-E15` |
-| `AIRLOCK-G17` | `AIRLOCK-P03` | installed end-to-end dispatch | required | pending | — | — | — | — |
+| `AIRLOCK-G17` | `AIRLOCK-P03` | installed end-to-end dispatch | required | failed | — | — | — | `AIRLOCK-E18` |
 | `AIRLOCK-G18` | `AIRLOCK-P03` | independent security/process review | required | passed | — | — | — | `AIRLOCK-E16` |
 | `AIRLOCK-G19` | `AIRLOCK-P03` | cleanup | required | pending | — | — | — | — |
-| `AIRLOCK-G20` | `AIRLOCK-P03` | publication and activation | required | pending | — | — | — | — |
+| `AIRLOCK-G20` | `AIRLOCK-P03` | publication and activation | required | passed | — | — | — | `AIRLOCK-E17` |
+| `AIRLOCK-G21` | `AIRLOCK-P04` | launcher contract and regression suite | required | pending | — | — | — | — |
+| `AIRLOCK-G22` | `AIRLOCK-P04` | canonical and agent consistency | required | pending | — | — | — | — |
+| `AIRLOCK-G23` | `AIRLOCK-P04` | independent security/process review | required | pending | — | — | — | — |
+| `AIRLOCK-G24` | `AIRLOCK-P04` | plugin and release validation | required | pending | — | — | — | — |
+| `AIRLOCK-G25` | `AIRLOCK-P04` | source end-to-end writer | required | pending | — | — | — | — |
+| `AIRLOCK-G26` | `AIRLOCK-P04` | installed end-to-end writer | required | pending | — | — | — | — |
+| `AIRLOCK-G27` | `AIRLOCK-P04` | publication and cleanup | required | pending | — | — | — | — |
 
 ## Gate evidence
 
@@ -107,6 +127,8 @@
 | `AIRLOCK-E14` | `AIRLOCK-G15` | C02 adapter source + byte-identical global worker; disposable `5d388e5` → `8c737ed` | `2026-08-06T09:54:38+02:00` | critical probe + independent reviewer | actual `airlock-worker`; `review-glm` | `openai/gpt-5.4-mini`, variant none; `zai-coding-plan/glm-5.2` | closed `opencode --pure run --agent airlock-worker --format json`; config resolution; parent/count/path/message/index/status audit; source/global hash; independent review | global OpenCode agent + exact disposable repo | passed | no fallback; one `owned.txt` commit with `AIRLOCK-P03-C02-PROBE`; five headings; session/repo removed; source/global SHA-256 `EC9C97C…`; no blocker |
 | `AIRLOCK-E15` | `AIRLOCK-G16` | C03 working candidate after `819ce33` | `2026-08-06T12:13:24+02:00` | orchestrator + verifier | source `airlock:orchestrator` → `airlock:external-runner` → `airlock-worker` | Fable/high → Haiku/medium → `openai/gpt-5.4-mini`/none | 21 Node tests; strict plugin validation; hashed-manifest source-plugin read-only dispatch; exact export/delete/absence checks | Airlock source + approved OpenCode temp home | passed | five skills/ten agents; direct-exe-npm; effective identity proof; read 1/1; terminal stop; five headings; session `ses_029720983ffeCqsKK9x8mp4cgC`, manifest, and NDJSON deleted/verified absent |
 | `AIRLOCK-E16` | `AIRLOCK-G18` | frozen C03 working candidate after `819ce33` | `2026-08-06T12:26:34+02:00` | independent reviewer + verifier | `review-glm`; `verify` | `zai-coding-plan/glm-5.2`; `alibaba-token-plan/deepseek-v4-flash-0731` | full source/global diff review; 21 Node tests; syntax; strict plugin validation; config/agent/version/path/secret/cleanup audits | Airlock source, global worker, approved temp home | passed | no blocking/high finding; contract clean; residual `.err` found by verifier and removed by exact path before staging |
+| `AIRLOCK-E17` | `AIRLOCK-G20` | source/remote commit `0c441c248aa012f7669b11240784c1e910d60fda` | `2026-08-06T21:29:51+02:00` | orchestrator | installed Claude plugin | OpenCode orchestrator | local/remote SHA comparison; installed plugin details | GitHub tracking ref and user-scoped Claude installation | passed | local HEAD equals `origin/main`; installed Airlock 1.3.0 exposes five skills and ten agents |
+| `AIRLOCK-E18` | `AIRLOCK-G17` | installed 1.3.0; disposable baseline candidates including exact commit `c5d94cddb9e6122423b91066dba8d18d42cfc7e6` | `2026-08-06T21:29:51+02:00` | orchestrator + debug | installed `airlock:orchestrator` → `airlock:external-runner` → `airlock-worker` | Fable/high → Haiku/medium → `openai/gpt-5.4-mini`/none | repeated bounded installed writer dispatches; retained sanitized debug NDJSON then exact deletion; Git parent/count/path/message/index/content audits | exact P03 disposable repositories | failed | one run created and passed audit for the exact candidate but launcher blocked on an over-specified read event; other runs combined denied Git calls, preflight-blocked, or guessed a patch pre-image; prompt retries stopped and architecture moved to P04 |
 
 ## Crossings
 
@@ -260,6 +282,20 @@
 - **Pack lifecycle after Crossing:** candidate
 - **Deviations:** prompt-only bridge replaced by user-approved dependency-free launcher after `AIRLOCK-D01`; C03 scope added launcher/tests and adapter documentation; interrupted-bridge orphan risk remains documented under the accepted user-account threat model
 
+### Crossing `AIRLOCK-P04-C01` — Deterministic candidate sealing core — 2026-08-06
+
+- **Delivery Pack:** `AIRLOCK-P04`
+- **Commit:** this commit (locate with `git log -S 'AIRLOCK-P04-C01' --oneline -- docs/ledger/2026-08-05-delivery-packs.md`)
+- **Candidate:** base `0c441c248aa012f7669b11240784c1e910d60fda` + staged product-diff hash `e5429cc67bb16b1c43eb7790f102b2161713a122` (`git hash-object --stdin` over staged launcher, tests, and approved design diff)
+- **Owned:** launcher and test source; P04 design/plan/ledger process artifacts
+- **Touched:** `scripts/run-external-agent.mjs`, `scripts/run-external-agent.test.mjs`, P04 design, P04 plan, and this ledger
+- **External handoff audit:** n/a; C01 implements the sealing boundary and used normal exact-path staging
+- **Evidence:** six observed RED groups; `node --check scripts/run-external-agent.mjs` passed; `node --test scripts/run-external-agent.test.mjs` passed 77/77 in 119.3s; `git diff --check` passed; early `review-glm` checkpoint found no blocker and approved C01 shipment
+- **Artifacts / cleanup:** subagent reported no residual launcher-test temporary path or process; P03 disposable repositories remain recorded for P04 cleanup; no C01 artifact remains
+- **Scope audit:** passed against C01 launcher/tests contract and orchestrator process-artifact ownership; historical P03 plan diff excluded
+- **Pack lifecycle after Crossing:** active
+- **Deviations:** built-in Git `text`/`eol` normalization is accepted standard repository behavior rather than overridden; custom executable filters remain blocked; real OpenCode and Windows proof is deferred to required G25/G26
+
 ## Open items
 
 | # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
@@ -267,10 +303,12 @@
 | 1 | user prompt 2026-08-05 | SHOULD_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C03` | `AIRLOCK-G07` | Standardize concise bullet-only orchestrator and subagent reports: outcome, changed paths, evidence, blockers, cleanup, actions. | done | `AIRLOCK-P02`; 19/19 host agents aligned and published |
 | 2 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G07` | Persist a bounded local resume checkpoint during active packs so compaction and fresh sessions can resume safely. | done | `AIRLOCK-P02`; canonical schema and lifecycle verified and published |
 | 3 | user prompt 2026-08-05 | MUST_FIX | `AIRLOCK-P01` | `AIRLOCK-P02-C01` | `AIRLOCK-G12` | Classify and clean temporary probes, screenshots, and processes while retaining deliberate evidence in its configured home. | done | `AIRLOCK-P02`; exact-path policy published; temporary output removed by exact path |
-| 4 | user prompt 2026-08-06 | FEATURE | `AIRLOCK-P03` | — | `AIRLOCK-G13`…`AIRLOCK-G20` | Let a Claude Opus/Fable orchestrator delegate approved tasks to multimodel external coding agents, implementing OpenCode first. | active | approved P03 design and plan |
+| 4 | user prompt 2026-08-06 | FEATURE | `AIRLOCK-P03` | — | `AIRLOCK-G13`…`AIRLOCK-G20` | Let a Claude Opus/Fable orchestrator delegate approved tasks to multimodel external coding agents, implementing OpenCode first. | superseded | P03 C01–C03 shipped; installed writer gate failed; repaired by `AIRLOCK-P04` |
+| 5 | `AIRLOCK-D02` / user approval 2026-08-06 | MUST_FIX | `AIRLOCK-P04` | — | `AIRLOCK-G21`…`AIRLOCK-G27` | Move mandatory deterministic checks and candidate sealing out of the probabilistic worker, remove the mandatory relay seam, and release 1.3.1. | active | approved P04 design, plan, mixed route, and gates |
 
 ## Debug records
 
 | Debug ID | Pack ID | Candidate / Crossing | Failed gate or check | Reproduction / root cause | Gates to rerun | State / repair pack |
 |---|---|---|---|---|---|---|
 | `AIRLOCK-D01` | `AIRLOCK-P03` | C03 working candidate after `819ce33` | source-plugin no-write external-route smoke | Prompt-only bridge was nondeterministic. Approved fix moved command construction, timeout, parsing, identity proof, and cleanup into a dependency-free launcher; foreground source smoke then passed Fable→Haiku→OpenCode with exact cleanup. | `AIRLOCK-G16`, `AIRLOCK-G18`; source smoke task 30 | resolved in C03; `AIRLOCK-E15` |
+| `AIRLOCK-D02` | `AIRLOCK-P03` → `AIRLOCK-P04` | installed 1.3.0 C04 writer gate | `AIRLOCK-G17` | The launcher was deterministic around OpenCode, but candidate creation still required a probabilistic worker to emit exact Git choreography. Repeated runs produced incompatible command, preflight, and patch behavior; one exact valid candidate was blocked only by an over-specified evidence event. Prompt tuning was stopped. Approved repair moves mandatory validation and candidate sealing into the launcher, makes Claude invoke its bounded summary directly, and releases 1.3.1. | `AIRLOCK-G21`…`AIRLOCK-G27` | active repair `AIRLOCK-P04`; design/route/gates approved |
