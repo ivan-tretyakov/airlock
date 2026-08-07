@@ -59,21 +59,21 @@
 - **Multi-Crossing reason:** launcher safety core, workflow adoption, release source, and installed activation are independently auditable layers of one repair.
 - **Rollback strategy:** disable/remove 1.3.1 activation and the global worker, then revert C03, C02, and C01 in reverse order without rewriting external or user history.
 - **Repairs:** `AIRLOCK-D02`; user-approved architecture reversal 2026-08-06
-- **Current candidate:** base `0c441c248aa012f7669b11240784c1e910d60fda` + staged product-diff hash `e5429cc67bb16b1c43eb7790f102b2161713a122`
+- **Current candidate:** base `ed5309b` + staged product-diff hash `5821f9062d823e4e4cfb667af626ea7cc06a6a39`
 - **Accepted candidate:** none
 
 ## Resume checkpoint
 
 - **State:** active
 - **Updated:** 2026-08-06
-- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C01` ready to commit
-- **Completed:** P04 C01 tasks 1–13, exact staged-name audit, product-diff hash, user checkpoint approval, and early different-family review
-- **Changed paths:** staged C01 launcher/tests and P04 design/plan/ledger; historical P03 plan remains preserved, unowned, and unstaged
-- **Fresh evidence:** `node --check scripts/run-external-agent.mjs` passed; `node --test scripts/run-external-agent.test.mjs` passed 77/77 in 119.3s; `git diff --check` passed; `review-glm` approved C01 with no blocking finding
-- **Blockers / decisions:** C01 ready for user checkpoint and ship; built-in Git `text`/`eol` normalization is accepted standard repository behavior rather than overridden, while custom executable filters remain blocked; real OpenCode/Windows proof remains required at G25/G26
+- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C02` ready to commit
+- **Completed:** C02 tasks 14–22, user checkpoint approval, exact staged-name audit, and product-diff identity
+- **Changed paths:** staged C02 launcher tests, canonical plan/ship/template, Claude agents, OpenCode worker, and P04 plan/ledger; byte-identical global worker activated; historical P03 plan remains preserved and unstaged
+- **Fresh evidence:** static RED 4/4 then GREEN 4/4; worker read-only RED reproduced preflight contract defect then GREEN; 81/81 launcher tests; syntax/diff checks; source/global SHA-256 `1226C89D…202B4`; OpenCode `airlock-worker` resolved primary; source launcher returned `done`, effective `openai/gpt-5.4-mini`, read 1/1, terminal stop, five headings, session `ses_02528746bffeWR287NZT1XWPIb` deleted
+- **Blockers / decisions:** no-write roles use launcher sealing permission `none`; writer roles allow one exact launcher candidate; first cleanup attempt failed because its shell cwd was inside the target, then exact retry from Airlock source removed and verified both paths
 - **Retained evidence:** P03/P04 designs and plans, this ledger, failed installed-run candidate SHA `c5d94cddb9e6122423b91066dba8d18d42cfc7e6`, and concise failed-run evidence in `AIRLOCK-E18`
-- **Temporary artifacts / processes:** exact P03 disposable repos `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-6c54d2c530574b778a3b28c16b26ee21` and `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-d65ab1b7e04d4118b7fdf28aca6a3c8f` remain for exact cleanup; second repo retains `dispatch-final-retained.json`; all reported OpenCode sessions were deleted; no known task-owned process remains
-- **Next action:** commit `AIRLOCK-P04-C01`, verify the commit, then activate C02 tasks 14–22
+- **Temporary artifacts / processes:** C02 smoke repo, manifest, NDJSON, session, and OpenCode tool-output file removed and verified absent; exact P03 disposable repos `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-6c54d2c530574b778a3b28c16b26ee21` and `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-d65ab1b7e04d4118b7fdf28aca6a3c8f` remain for P04 cleanup; no known task-owned process remains
+- **Next action:** commit `AIRLOCK-P04-C02`, verify source/global worker equality remains, then activate C03 tasks 23–31
 
 ## Gate register
 
@@ -295,6 +295,20 @@
 - **Scope audit:** passed against C01 launcher/tests contract and orchestrator process-artifact ownership; historical P03 plan diff excluded
 - **Pack lifecycle after Crossing:** active
 - **Deviations:** built-in Git `text`/`eol` normalization is accepted standard repository behavior rather than overridden; custom executable filters remain blocked; real OpenCode and Windows proof is deferred to required G25/G26
+
+### Crossing `AIRLOCK-P04-C02` — Adopt launcher-sealed ownership — 2026-08-06
+
+- **Delivery Pack:** `AIRLOCK-P04`
+- **Commit:** this commit (locate with `git log -S 'AIRLOCK-P04-C02' --oneline -- docs/ledger/2026-08-05-delivery-packs.md`)
+- **Candidate:** base `ed5309b` + staged product-diff hash `5821f9062d823e4e4cfb667af626ea7cc06a6a39` (`git hash-object --stdin` over staged C02 source diff)
+- **Owned:** launcher static-assertion tests, Claude orchestrator/compatibility relay, OpenCode worker, canonical plan/ship/ledger template, byte-identical global worker, and P04 process artifacts
+- **Touched:** `scripts/run-external-agent.test.mjs`, `agents/orchestrator.md`, `agents/external-runner.md`, `adapters/opencode/agents/airlock-worker.md`, `skills/plan/SKILL.md`, `skills/ship/SKILL.md`, `skills/ship/LEDGER.template.md`, P04 plan, and this ledger; global worker outside Git
+- **External handoff audit:** no candidate handoff; no-write smoke used source launcher v1 read-only compatibility, actual global `airlock-worker`, `openai/gpt-5.4-mini`/none, policy `sha256:eeba8b0d24c9f53980a429ed2a3c2030c03d0bc32f4be7bd4048a72d98de4740` / proof `AIRLOCK-E12`, read 1/1, terminal stop, and session `ses_02528746bffeWR287NZT1XWPIb` deleted
+- **Evidence:** static RED 4/4 then GREEN 4/4; read-only preflight RED then focused GREEN; `node --check` passed; launcher suite passed 81/81 in 128.5s; source/global SHA-256 `1226C89DA78A3E26E7FB9604F4D00F2BCD26784321CB2FF00391463E4C4202B4`; real smoke result `done`; `git diff --check` passed
+- **Artifacts / cleanup:** C02 smoke repository, manifest, NDJSON, session, and one OpenCode tool-output file removed by exact path/ID and verified absent; P03 disposable repositories remain tracked for P04 cleanup
+- **Scope audit:** passed against amended C02 file contract; historical P03 plan diff excluded
+- **Pack lifecycle after Crossing:** active
+- **Deviations:** task 14 required the already-approved launcher test path omitted from the initial C02 row, so the plan mapping was corrected without widening overall scope; read-only launcher sealing permission was clarified to `none` after the real smoke caught an over-strict worker preflight
 
 ## Open items
 

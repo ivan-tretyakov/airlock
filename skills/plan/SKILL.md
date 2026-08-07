@@ -9,7 +9,7 @@ Precondition: an approved design or scope contract exists. If not, stop and invo
 
 ## Core units and lifecycle
 
-- A **Crossing** is one scope-audited, buildable commit with focused evidence. Under an approved external handoff, the worker commit is a product candidate precursor, not a Crossing; the following orchestrator-owned process-artifact commit is the Crossing and references that candidate.
+- A **Crossing** is one scope-audited, buildable commit with focused evidence. Under an approved external writer handoff, the launcher-sealed candidate precursor contains only exact product paths and is not a Crossing; the following orchestrator-owned process-artifact commit is the Crossing and references that candidate SHA/tree.
 - A **Delivery Pack** is one coherent outcome delivered by one or more contiguous Crossings. Finish its Crossing sequence before committing a Crossing from another pack.
 - A multi-Crossing Delivery Pack records why one Crossing is insufficient, dependencies, and a pack-level rollback strategy. Dependent Crossings are not promised to remain independently revertible.
 - Pack lifecycle is `planned → active → candidate → accepted`. `blocked`, `abandoned`, and `reverted` are exceptional terminal outcomes. Post-ship review lifecycle is orthogonal and never substitutes for pack lifecycle.
@@ -53,7 +53,7 @@ Keep the checkpoint bounded to these fields:
 - **Active pack / Crossing:** exact IDs.
 - **Completed:** concise completed tasks/Crossings.
 - **Changed paths:** current attributable paths, not the whole worktree.
-- **Fresh evidence:** current evidence IDs or concise command/tool references and results; for an external run, include its session ID, completion/classification, selected and effective route, and permission-policy identity/proof.
+- **Fresh evidence:** current evidence IDs or concise command/tool references and results; for an external run, include its session ID, completion/classification, launcher candidate SHA/tree, selected and effective route, permission-policy identity/proof, deterministic-validation/Git proof, and recovery state.
 - **Blockers / decisions:** unresolved blockers and approved decisions.
 - **Retained evidence:** exact stable paths in the configured evidence home and their ledger/gate references.
 - **Temporary artifacts / processes:** exact task-owned paths/processes and cleanup state, including external sessions and processes when applicable.
@@ -92,20 +92,31 @@ Parallel tasks must have disjoint `Owns` sets. Serialize shared files, entry poi
 
 Use an external runtime only when the approved route names it; never substitute one based on cost or work class. For each external run, record this complete route:
 
-| Pack / Crossing / task | Runtime | Role | Selected agent | Model | Variant | Target directory | Approved branch | Exact file contract | Approved commands | Permission / containment policy identity and proof | Foreground timeout | Commit permission | Session / evidence / cleanup policy | Independence limits |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `<IDs>` | `<runtime>` | `<host role>` | `<agent>` | `<model>` | `<variant>` | `<exact directory>` | `<branch>` | `<Owns, exclusions, STOP rule>` | `<exact allowlist>` | `<full policy or immutable source + hash; process guardrails; effective-policy proof>` | `<duration>` | `none` or `one scoped product candidate commit` | `<return, checkpoint, retention, exact cleanup>` | `<shared context/family or other limits>` |
+| Pack / Crossing / task | Runtime | Role | Selected agent | Model | Variant | Target directory | Approved branch | Structured baseline | Exact file contract | Worker reads/edits + exploratory commands | Mandatory validation argv | Permission / containment identity + proof | Foreground timeout | Commit permissions | Manifest / artifacts / session / cleanup | Independence limits |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `<IDs>` | `<runtime>` | `<host role>` | `<agent>` | `<model>` | `<variant>` | `<exact directory>` | `<branch>` | `<full HEAD; index empty; porcelain-v2 status; owned + dirty hashes>` | `<Owns, exclusions, STOP rule>` | `<exact read/edit selectors and optional exploratory allowlist>` | `<ordered direct executable + args arrays, cwd, timeout, output bounds, expected exit>` | `<total invocation policy identity/hash; guardrails; precedence proof>` | `<duration>` | `worker none; launcher one exact candidate with Crossing/message/hash/path set` | `<exact external manifest, temporary directory, evidence, message, hooks, fresh session, retention, cleanup>` | `<shared context/family or other limits>` |
 
-External file-writing runs are foreground and serialized per checkout. Read-only external runs may overlap only when they cannot contend for mutable state. Immediately before dispatching a writer:
+For every external writer, materialize one strict `airlock.external-agent/v2` manifest with exactly these route-derived fields: `schema`, `runtime`, `packId`, `crossingId`, `route{agent,model,variant,targetDirectory,branch}`, `prompt`, `opencode{config,permission}`, `timeoutMs`, `baseline{branch,head,indexEmpty,status,ownedPathHashes,dirtyPathHashes}`, `ownedPaths`, `validations[{purpose,executable,args,workingDirectory,timeoutMs,maxStdoutBytes,maxStderrBytes,expectedExitCode}]`, `commit{allowed,crossingId,message,messageSha256,candidatePaths}`, `artifacts{manifestPath,temporaryDirectory,evidencePath,messagePath,hooksDirectory}`, `expected{workerStatus,headings,mutations[{tool,input,minimum}],effectiveIdentity{provider,model}}`, `cleanup{session,manifest,temporaryDirectory,verifyAbsence}`, `retention{session,manifest,temporaryDirectory,transcript}`, and `policy{identity,proof}`. Unknown or omitted fields fail closed. Validation commands are direct executable/argument arrays with checkout-contained working directories and no shell tokenization, operators, interpolation, redirects, or pipelines.
+
+Commit authority is always split for this route: worker commit permission `none`; launcher sealing permission is one exact candidate under `commit{allowed,crossingId,message,messageSha256,candidatePaths}`. The worker owns scoped investigation, edits, and optional exploratory evidence. The launcher alone owns mandatory deterministic validations, exact staging, the commit, candidate proof, runtime cleanup, and one bounded summary. The orchestrator owns the independent candidate audit and separate Crossing.
+
+External file-writing runs are foreground and serialized per target checkout. Read-only external runs may overlap only when they cannot contend for mutable state. Immediately before manifest creation for a writer:
 
 1. record the approved branch and prove `git branch --show-current` matches it;
 2. record the full `HEAD` SHA;
 3. prove `git diff --cached --name-status` is empty;
-4. capture the complete, unfiltered `git status --short` baseline;
-5. prove every task-owned path is clean; and
-6. prove the route's complete closed permission/containment policy is loaded and effective under its recorded identity, including precedence over ambient defaults.
+4. capture and parse the complete `git status --porcelain=v2 -z --untracked-files=all --ignore-submodules=none` baseline;
+5. hash every exact owned path and every path represented by the structured dirty baseline, preserving absent/file state and rejecting symlinks;
+6. prove every task-owned path is clean; and
+7. prove the route's complete closed permission/containment policy is loaded and effective under its recorded identity, including precedence over ambient defaults.
 
-Preserve pre-existing unrelated status entries and exclude those paths from the worker contract. Stop if a precondition fails. From dispatch until the worker returns, the orchestrator performs no file or git operation in that checkout.
+Preserve pre-existing unrelated status entries and exclude those paths from the worker contract. Stop if a precondition fails. The orchestrator writes the exact external manifest, hashes its exact bytes, and invokes this command directly exactly once in the foreground:
+
+```text
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs" --manifest <absolute-json-path> --sha256 <lowercase-hex>
+```
+
+Do not route an active dispatch through `Agent`, `external-runner`, a background job, or a resumed transcript. From launcher invocation until its bounded JSON summary returns, the orchestrator remains idle in that checkout and performs no target file, Git, validation, browser, or agent operation. The launcher assigns a fresh non-resumable runtime session, redirects raw events to the declared evidence path, and returns only the bounded summary.
 
 ## Select gates with discretion
 
@@ -161,22 +172,22 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 >
 > **STOP rule:** if the task appears to require any path outside the allowlist, **STOP and report back. Do not edit it.** A blocked task reported honestly is a success; widened scope is not.
 
-Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the concise return contract above. When an external route grants commit permission, require the exact Crossing ID in the worker candidate commit message. Require the agent to classify every non-product artifact it creates:
+Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the concise return contract above. For a launcher-sealed external writer route, restate worker commit permission `none`, launcher sealing permission, the exact Crossing ID/message bytes/hash/candidate path set, and that the worker must make no candidate-commit claim. Require the agent to classify every non-product artifact it creates:
 
 - **Retained evidence:** move file-based evidence to the project-configured evidence home under a stable exact path when that path is allowlisted, and return the intended ledger/gate reference. Otherwise return the exact source path for an orchestrator-owned move without widening scope.
 - **Temporary:** return every exact task-owned path/process and remove or stop it before returning when ownership is certain and cleanup is safe.
 
 Never authorize broad-glob cleanup or deletion of unknown, pre-existing, user-owned, or another lane's artifacts. If ownership or safe cleanup cannot be established, leave the item in place and return `blocked` with its exact path/process and required decision. For Playwright/browser work, retain only required evidence and remove superseded task-created screenshots, downloads, traces, and logs; never clean credentials, browser profiles, cookies, localStorage, or other user state.
 
-For every external run, supply a complete closed permission set for that invocation, with a final deny-by-default rule proven to override ambient defaults; do not inherit or leave any decision to ambient permissions. Allow only the route's exact reads, owned edits for a writing role, approved commands, target directory, and required evidence/runtime paths; read-only roles receive no edit permission. Explicitly deny automatic approval (`--auto` or equivalent), nested delegation, interactive questions, unowned edits, arbitrary shell commands, undeclared external paths, project or runtime configuration, credentials, and push/publish operations. The approved scoped git commands are the only git operations the worker may use. Disable interactive credential prompts, inherited SSH-agent access, and remote push capability. Policy identity is the full invocation policy or its immutable source plus content hash, together with these process guardrails and effective-policy proof.
+For every external run, supply a complete closed permission set for that invocation, with a final deny-by-default rule proven to override ambient defaults; do not inherit or leave any decision to ambient permissions. Allow only the route's exact reads, owned edits for a writing role, optional exploratory commands, target directory, and required evidence/runtime paths; read-only roles receive no edit permission. Explicitly deny automatic approval (`--auto` or equivalent), nested delegation, interactive questions, unowned edits, arbitrary shell commands, undeclared external paths, project or runtime configuration, credentials, every Git write, and push/publish operations. A worker may use a read-only Git command only when its exact command is plan-approved and allowed by the manifest; it remains exploratory evidence. Disable interactive credential prompts, inherited SSH-agent access, and remote push capability. Policy identity is the full invocation policy or its immutable source plus content hash, together with these process guardrails and effective-policy proof.
 
 These restrictions are guardrails for an honest agent, not containment of a hostile process. Deterministic return audits are the local-checkout correctness boundary; external side effects remain guardrail and self-report territory.
 
-Require the worker or adapter to return the external session ID, completion state, selected and effective runtime/agent/model/variant, policy identity/proof, evidence summary, and every exact artifact/process. Record identity, route, and result under checkpoint **Fresh evidence**, and exact session/process cleanup under **Temporary artifacts / processes**. Resume an interrupted run only after verifying the checkout against its recorded branch, parent, index, status baseline, and attributable delta; fork instead when the failed session must remain intact. Clean accepted or abandoned runs only by exact session ID, path, and process according to the approved route and the artifact rules above.
+Require the launcher summary to report the fresh external session ID, completion/classification, selected and effective runtime/agent/model/variant, policy identity/proof, worker mutation evidence, deterministic validation results, Git-sealing proof, launcher candidate SHA/tree when created, recovery state, and every exact artifact/process cleanup result. Record these under checkpoint **Fresh evidence**, and exact session/process/path cleanup under **Temporary artifacts / processes**.
 
-If a return times out, is killed, or is indeterminate, make no checkout edit. Stop only the exact task-owned process when its identity is certain and doing so is safe. Once the checkout is quiescent, inspect branch, `HEAD`, index, and the complete `git status --short` before any edit; classify the state as `no-commit`, `one-commit`, or `indeterminate`, and complete the applicable return audit for a one-commit state. Then update the checkpoint fields above and resume or fork only when checkout verification passes. If verification fails, stop without cleanup or history mutation. If process ownership is uncertain, leave the process and checkout untouched and stop for a user decision; checkpointing waits until it cannot race that process.
+If the launcher return times out, is killed, lacks one valid summary, or is otherwise indeterminate, make no checkout edit. Stop only the exact task-owned process when its identity is certain and doing so is safe. Once the checkout is proven quiescent, inspect branch, `HEAD`, index, complete structured status, owned hashes, and baseline-dirty hashes before any edit. Classify the state as `no-commit` when `HEAD` is unchanged and all attributable edits are confined to exact owned paths; `one-commit` only when `HEAD` is exactly one child with the exact Crossing message and candidate path set; otherwise `indeterminate`. A one-commit state may proceed only to the full independent launcher-candidate audit. If any verification fails or process ownership is uncertain, leave the process, checkout, index, history, and artifacts untouched and stop for a user decision. Never reset, amend, rebase, clean, or otherwise rewrite candidate history.
 
-After return, audit `git status --short` and the attributable changed-path delta against the contract before accepting the work; surface out-of-contract paths instead of silently keeping, deleting, or reverting them. Verify returned artifact paths/processes and cleanup state, then replace the ledger Resume checkpoint in place.
+After a valid return, independently audit the launcher-sealed candidate's parent/count/SHA/tree/message/paths, empty index, complete structured status delta, selected/effective route, policy proof, validation/Git evidence, and exact cleanup before acceptance. Surface out-of-contract or unknown state instead of silently keeping, deleting, reverting, or repairing it. Then replace the ledger Resume checkpoint in place.
 
 ## Implement
 

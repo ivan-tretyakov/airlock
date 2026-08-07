@@ -691,6 +691,179 @@ function fakeWriterRuntime(
   };
 }
 
+const CANONICAL_SOURCE = Object.freeze({
+  orchestrator: new URL("../agents/orchestrator.md", import.meta.url),
+  externalRunner: new URL("../agents/external-runner.md", import.meta.url),
+  worker: new URL(
+    "../adapters/opencode/agents/airlock-worker.md",
+    import.meta.url,
+  ),
+  plan: new URL("../skills/plan/SKILL.md", import.meta.url),
+  ship: new URL("../skills/ship/SKILL.md", import.meta.url),
+  ledger: new URL("../skills/ship/LEDGER.template.md", import.meta.url),
+});
+
+async function readCanonicalSource(source) {
+  return readFile(source, "utf8");
+}
+
+function occurrences(text, value) {
+  return text.split(value).length - 1;
+}
+
+test(
+  "orchestrator directly invokes one strict launcher manifest and audits its sealed candidate",
+  async () => {
+    const source = await readCanonicalSource(CANONICAL_SOURCE.orchestrator);
+    const launcherPath =
+      "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs";
+
+    for (const required of [
+      "airlock.external-agent/v2",
+      "baseline{branch,head,indexEmpty,status,ownedPathHashes,dirtyPathHashes}",
+      "validations[{purpose,executable,args,workingDirectory,timeoutMs,maxStdoutBytes,maxStderrBytes,expectedExitCode}]",
+      "commit{allowed,crossingId,message,messageSha256,candidatePaths}",
+      "artifacts{manifestPath,temporaryDirectory,evidencePath,messagePath,hooksDirectory}",
+      "one bounded JSON summary",
+      "no candidate sealed",
+      "candidate sealed; independent audit required",
+      "indeterminate",
+    ]) {
+      assert.ok(
+        source.includes(required),
+        `missing orchestrator contract: ${required}`,
+      );
+    }
+    assert.equal(occurrences(source, launcherPath), 1);
+    assert.match(source, /invoke it directly, exactly once, in the foreground/i);
+    assert.match(source, /remain idle in the target checkout/i);
+    assert.match(source, /independently audit the launcher-sealed candidate/i);
+    assert.match(
+      source,
+      /Never use `Agent` or `external-runner` for active dispatch/,
+    );
+    assert.match(
+      source,
+      /Do not construct an OpenCode command, a launcher-internal Git command, or a deterministic validation command outside the manifest/,
+    );
+    assert.doesNotMatch(
+      source,
+      /delegate[^\n]+to `external-runner` as a foreground subagent/i,
+    );
+  },
+);
+
+test("external-runner is an unambiguous superseded compatibility record", async () => {
+  const source = await readCanonicalSource(CANONICAL_SOURCE.externalRunner);
+
+  assert.match(source, /superseded compatibility/i);
+  assert.match(source, /not an active or mandatory dispatch route/i);
+  assert.match(source, /must not invoke the launcher/i);
+  assert.doesNotMatch(source, /run-external-agent\.mjs/);
+  assert.doesNotMatch(source, /first and only tool call/i);
+});
+
+test(
+  "OpenCode worker owns edits and exploratory evidence without Git sealing claims",
+  async () => {
+    const source = await readCanonicalSource(CANONICAL_SOURCE.worker);
+
+    for (const required of [
+      "scoped reads and edits",
+      "exploratory evidence only",
+      "Worker commit permission is always `none`",
+      "launcher sealing permission is `none` for read-only roles or one exact candidate for writers",
+      "fresh, non-resumable runtime session ID is assigned at launch",
+      "Never claim that a candidate commit exists",
+    ]) {
+      assert.ok(
+        source.includes(required),
+        `missing worker boundary: ${required}`,
+      );
+    }
+    assert.match(source, /Never perform a Git write/i);
+    assert.doesNotMatch(source, /one scoped product candidate commit/);
+    for (const heading of AIRLOCK_HEADINGS) {
+      assert.equal(
+        occurrences(source, `- **${heading}:**`),
+        1,
+        `worker must retain exactly one ${heading} bullet`,
+      );
+    }
+  },
+);
+
+test("canonical plan, ship, and ledger use launcher-sealed candidate semantics", async () => {
+  const [planSource, shipSource, ledgerSource] = await Promise.all([
+    readCanonicalSource(CANONICAL_SOURCE.plan),
+    readCanonicalSource(CANONICAL_SOURCE.ship),
+    readCanonicalSource(CANONICAL_SOURCE.ledger),
+  ]);
+
+  for (const required of [
+    "launcher-sealed candidate precursor",
+    "baseline{branch,head,indexEmpty,status,ownedPathHashes,dirtyPathHashes}",
+    "validations[{purpose,executable,args,workingDirectory,timeoutMs,maxStdoutBytes,maxStderrBytes,expectedExitCode}]",
+    "commit{allowed,crossingId,message,messageSha256,candidatePaths}",
+    "artifacts{manifestPath,temporaryDirectory,evidencePath,messagePath,hooksDirectory}",
+    "worker commit permission `none`",
+    "launcher sealing permission",
+    "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs",
+  ]) {
+    assert.ok(
+      planSource.includes(required),
+      `missing canonical plan contract: ${required}`,
+    );
+  }
+  assert.match(planSource, /foreground and serialized per target checkout/i);
+  assert.match(planSource, /orchestrator remains idle in that checkout/i);
+
+  for (const required of [
+    "launcher-sealed candidate precursor",
+    "no-summary",
+    "no-commit",
+    "one-commit",
+    "indeterminate",
+    "cleanup failure after commit",
+    "separate orchestrator Crossing",
+  ]) {
+    assert.ok(
+      sourceIncludesCaseInsensitive(shipSource, required),
+      `missing ship recovery contract: ${required}`,
+    );
+  }
+  assert.match(shipSource, /never rewrite candidate history/i);
+
+  for (const required of [
+    "Launcher candidate SHA / tree",
+    "Selected / effective route",
+    "Policy identity / proof",
+    "Deterministic validation proof",
+    "Git sealing / audit proof",
+    "Recovery classification",
+    "Exact cleanup",
+  ]) {
+    assert.ok(ledgerSource.includes(required), `missing ledger field: ${required}`);
+  }
+
+  const canonical = [planSource, shipSource, ledgerSource].join("\n");
+  for (const stale of [
+    "worker commit is a product candidate precursor",
+    "one scoped product candidate commit",
+    "worker precursor",
+  ]) {
+    assert.equal(
+      sourceIncludesCaseInsensitive(canonical, stale),
+      false,
+      `stale external-candidate terminology remains: ${stale}`,
+    );
+  }
+});
+
+function sourceIncludesCaseInsensitive(source, value) {
+  return source.toLowerCase().includes(value.toLowerCase());
+}
+
 test("writer manifest accepts the strict structured sealing contract", async (t) => {
   const paths = await makeTemporaryTree(t);
   const manifest = makeWriterManifest(paths);

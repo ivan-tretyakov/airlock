@@ -109,7 +109,7 @@ P03 remains historical evidence: C01–C03 shipped 1.3.0 source; C04 failed at t
 | Crossing ID | Pack ID | Tasks | Buildable result | Depends on | Owns |
 |---|---|---|---|---|---|
 | `AIRLOCK-P04-C01` | P04 | 1–13 | launcher validates the new contract, executes deterministic final checks, seals and audits exact candidates, and handles failures under tests | approved design | `scripts/run-external-agent.mjs`, `scripts/run-external-agent.test.mjs` |
-| `AIRLOCK-P04-C02` | P04 | 14–22 | canonical workflow, Claude route, worker boundary, ledger schema, and global worker consistently use launcher-sealed candidates | C01 | canonical skills/template, Claude/OpenCode agents, global worker |
+| `AIRLOCK-P04-C02` | P04 | 14–22 | canonical workflow, Claude route, worker boundary, ledger schema, and global worker consistently use launcher-sealed candidates | C01 | launcher static-assertion tests, canonical skills/template, Claude/OpenCode agents, global worker |
 | `AIRLOCK-P04-C03` | P04 | 23–31 | complete documented 1.3.1 source validates, passes source writer smoke, and has independent frozen-candidate approval | C02 | docs, conventions, adapter README, manifests, all source candidate paths |
 | `AIRLOCK-P04-C04` | P04 | 32–39 | 1.3.1 is pushed, published, installed, passes fresh installed writer/audit and cleanup gates, and P04 is accepted | C03 | external activation plus orchestrator process artifacts |
 
@@ -137,15 +137,15 @@ Expected RED evidence is a precise assertion failure or unsupported-manifest cla
 
 ### Crossing 2 - Workflow And Agent Adoption
 
-- [ ] 14. Add RED static/fixture assertions to the launcher suite for the new orchestrator route, worker no-commit boundary, launcher-sealed terminology, and absence of active mandatory relay routing.
-- [ ] 15. Update `agents/orchestrator.md` to create/hash the new manifest, invoke the launcher directly once, remain idle during execution, perform crash recovery inspection, and independently audit the launcher-sealed candidate.
-- [ ] 16. Update `agents/external-runner.md` as superseded/non-routing compatibility documentation, or stop for a scope decision if retaining it creates an active ambiguity.
-- [ ] 17. Update the source OpenCode worker to own reads/edits and exploratory evidence only, deny Git writes, describe fresh runtime session semantics correctly, and report no candidate-commit claim.
-- [ ] 18. Update canonical plan routing and manifest semantics from worker-created to launcher-sealed candidates while preserving plan-approved model, command, permission, and cleanup decisions.
-- [ ] 19. Update canonical ship audit and `LEDGER.template.md` for launcher candidate SHA/tree, deterministic validation evidence, crash recovery, cleanup-after-commit blocking, and separate orchestrator Crossing ownership.
-- [ ] 20. Rerun static assertions, launcher tests, and canonical consistency searches GREEN; audit all changed paths against C02 ownership.
-- [ ] 21. Copy the reviewed worker byte-for-byte to `C:/Users/IvanTretyakov/.config/opencode/agents/airlock-worker.md`; prove source/global hashes match without modifying global OpenCode configuration.
-- [ ] 22. Run OpenCode config resolution and one no-write worker smoke under the revised closed policy, remove its exact session/artifacts, then checkpoint before C02 shipping.
+- [x] 14. Add RED static/fixture assertions to the launcher suite for the new orchestrator route, worker no-commit boundary, launcher-sealed terminology, and absence of active mandatory relay routing.
+- [x] 15. Update `agents/orchestrator.md` to create/hash the new manifest, invoke the launcher directly once, remain idle during execution, perform crash recovery inspection, and independently audit the launcher-sealed candidate.
+- [x] 16. Update `agents/external-runner.md` as superseded/non-routing compatibility documentation, or stop for a scope decision if retaining it creates an active ambiguity.
+- [x] 17. Update the source OpenCode worker to own reads/edits and exploratory evidence only, deny Git writes, describe fresh runtime session semantics correctly, and report no candidate-commit claim.
+- [x] 18. Update canonical plan routing and manifest semantics from worker-created to launcher-sealed candidates while preserving plan-approved model, command, permission, and cleanup decisions.
+- [x] 19. Update canonical ship audit and `LEDGER.template.md` for launcher candidate SHA/tree, deterministic validation evidence, crash recovery, cleanup-after-commit blocking, and separate orchestrator Crossing ownership.
+- [x] 20. Rerun static assertions, launcher tests, and canonical consistency searches GREEN; audit all changed paths against C02 ownership.
+- [x] 21. Copy the reviewed worker byte-for-byte to `C:/Users/IvanTretyakov/.config/opencode/agents/airlock-worker.md`; prove source/global hashes match without modifying global OpenCode configuration.
+- [x] 22. Run OpenCode config resolution and one no-write worker smoke under the revised closed policy, remove its exact session/artifacts, then checkpoint before C02 shipping.
 
 ### Crossing 3 - Documentation, Release Source, And Source Proof
 
@@ -177,7 +177,7 @@ All file-writing groups are serialized. Read-only independent review and verific
 | Pack / Crossing / task | Work class | Host role | Mode | Selected agent/runtime | Selected model | Why | Parallel group | Checkpoint | Owns |
 |---|---|---|---|---|---|---|---|---|---|
 | P04-C01 1–13 | Critical | implementer | subagent | `code-critical` | Sol max | security-sensitive public manifest and Git transaction boundary | A | yes | launcher + tests |
-| P04-C02 14–20 | Critical | implementer | subagent | `code-critical` | Sol max | cross-cutting ownership and recovery semantics | B after A | yes | canonical skills/template + agents |
+| P04-C02 14–20 | Critical | implementer | subagent | `code-critical` | Sol max | cross-cutting ownership and recovery semantics | B after A | yes | launcher tests + canonical skills/template + agents |
 | P04-C02 21–22 | Critical | orchestrator | inline | active orchestrator | Sol | global activation and real runtime state stay orchestrator-owned | C after B | yes | global worker + exact temp state |
 | P04-C03 23–28 | Standard | implementer/orchestrator | mixed | `code-standard` then active orchestrator | Terra high then Sol | mechanical docs/release followed by controlled source integration | D after C | yes | docs/manifests, then temp source probe |
 | P04-C03 29 | Critical | independent-reviewer | subagent | `review-glm` | GLM high | different-family hostile review | E after freeze | yes | read-only candidate |
