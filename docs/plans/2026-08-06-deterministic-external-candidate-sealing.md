@@ -161,14 +161,14 @@ Expected RED evidence is a precise assertion failure or unsupported-manifest cla
 
 ### Crossing 4 - Publish, Install, Prove, And Accept
 
-- [ ] 32. Push the reviewed C01–C03 source Crossings to `origin/main` under the standing user instruction to push everything; verify local/remote SHA equality.
-- [ ] 33. Update the marketplace and installed plugin to 1.3.1 through supported plugin commands, never direct cache editing; verify version, five skills, and ten agents.
-- [ ] 34. Create exact disposable installed-gate repo `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p04-installed-writer` with branch `main`, one baseline `owned.txt` commit, and no unrelated state.
-- [ ] 35. Run installed Fable orchestrator direct-to-launcher-to-OpenCode writer flow with `openai/gpt-5.4-mini`, variant none: worker reads and edits only `owned.txt`; launcher runs one argv-declared content validation, seals one candidate, and returns `done` with effective identity and cleanup evidence.
-- [ ] 36. Independently audit branch, recorded parent, exactly one child commit, exact Crossing message, changed-name set, tree, file bytes/final newline, empty index, clean status except declared external artifacts, effective route, policy identity, and session/process state.
-- [ ] 37. Delete exact source/installed disposable repos, manifests, evidence, message files, hooks directories, OpenCode sessions, and attributable processes; verify absence and do not clean unknown state.
-- [ ] 38. Run final installed inventory and bounded no-write smoke; record G21–G27 evidence, close the Resume checkpoint, mark P03 failed/superseded and P04 accepted, and stage only exact C04 process artifacts.
-- [ ] 39. Invoke `airlock:ship` for the final Crossing, commit the ledger/plan closure, push `main`, and verify local/remote SHA equality and intact deliverable documents.
+- [x] 32. Push the reviewed C01–C03 source Crossings to `origin/main` under the standing user instruction to push everything; verify local/remote SHA equality.
+- [x] 33. Update the marketplace and installed plugin to 1.3.1 through supported plugin commands, never direct cache editing; verify version, five skills, and ten agents.
+- [x] 34. Create exact disposable installed-gate repo `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p04-installed-writer` with branch `main`, one baseline `owned.txt` commit, and no unrelated state.
+- [x] 35. Run installed Fable orchestrator direct-to-launcher-to-OpenCode writer flow with `openai/gpt-5.4-mini`, variant none: worker reads and edits only `owned.txt`; launcher runs one argv-declared content validation, seals one candidate, and returns `done` with effective identity and cleanup evidence.
+- [x] 36. Independently audit branch, recorded parent, exactly one child commit, exact Crossing message, changed-name set, tree, file bytes/final newline, empty index, clean status except declared external artifacts, effective route, policy identity, and session/process state.
+- [x] 37. Delete exact source/installed disposable repos, manifests, evidence, message files, hooks directories, OpenCode sessions, and attributable processes; verify absence and do not clean unknown state.
+- [x] 38. Run final installed inventory and bounded no-write smoke; record G21–G27 evidence, close the Resume checkpoint, mark P03 failed/superseded and P04 accepted, and stage only exact C04 process artifacts.
+- [x] 39. Invoke `airlock:ship` for the final Crossing, commit the ledger/plan closure, push `main`, and verify local/remote SHA equality and intact deliverable documents.
 
 ## Execution Routing
 
