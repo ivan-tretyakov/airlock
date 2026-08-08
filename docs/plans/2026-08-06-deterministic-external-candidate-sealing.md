@@ -168,7 +168,7 @@ Expected RED evidence is a precise assertion failure or unsupported-manifest cla
 - [x] 36. Independently audit branch, recorded parent, exactly one child commit, exact Crossing message, changed-name set, tree, file bytes/final newline, empty index, clean status except declared external artifacts, effective route, policy identity, and session/process state.
 - [x] 37. Delete exact source/installed disposable repos, manifests, evidence, message files, hooks directories, OpenCode sessions, and attributable processes; verify absence and do not clean unknown state.
 - [x] 38. Run final installed inventory and bounded no-write smoke; record G21–G27 evidence, close the Resume checkpoint, mark P03 failed/superseded and P04 accepted, and stage only exact C04 process artifacts.
-- [x] 39. Invoke `airlock:ship` for the final Crossing, commit the ledger/plan closure, push `main`, and verify local/remote SHA equality and intact deliverable documents.
+- [ ] 39. Invoke `airlock:ship` for the final Crossing, commit the ledger/plan closure, push `main`, and verify local/remote SHA equality and intact deliverable documents. Local closure commit `728efd4` exists; final push is blocked on GitHub HTTPS authentication.
 
 ## Execution Routing
 

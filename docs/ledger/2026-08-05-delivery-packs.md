@@ -64,16 +64,16 @@
 
 ## Resume checkpoint
 
-- **State:** closed
+- **State:** active
 - **Updated:** 2026-08-08
-- **Active pack / Crossing:** `AIRLOCK-P04` / final `AIRLOCK-P04-C04`
-- **Completed:** C01 `ed5309b`, C02 `ac4d396`, C03 `25fb972`; G21–G27 passed; 1.3.1 pushed, installed, source/installed writer gates audited, cleanup complete, P04 accepted
-- **Changed paths:** final P04 plan/ledger Crossing only; approved Claude settings/global worker retained outside Git; historical P03 plan remains preserved and unowned
+- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C04` committed locally; final process push blocked
+- **Completed:** C01 `ed5309b`, C02 `ac4d396`, C03 `25fb972` pushed; C04 closure `728efd4` committed locally; G21–G27 passed; 1.3.1 installed, writer gates audited, cleanup complete, P04 accepted
+- **Changed paths:** push-blocker checkpoint correction only; approved Claude settings/global worker retained outside Git; historical P03 plan remains preserved and unowned
 - **Fresh evidence:** `AIRLOCK-E19`…`AIRLOCK-E25`; installed writer `502365b` → `c52a56ff8a93e15b19803aa9b5417f9a3d72358c`, tree `d4bbd11b24810a225621e1ebe4028a2a4e7293f8`; Fable direct installed launcher → effective `openai/gpt-5.4-mini`, policy `sha256:266dee1d…ddec4`, apply_patch 1/1, validation/seal/audit/cleanup passed
-- **Blockers / decisions:** none; P03 remains failed/superseded historical evidence; P04 1.3.1 is accepted; post-ship feedback uses Airlock review
+- **Blockers / decisions:** final `git push origin main` cannot read GitHub HTTPS username with interactivity disabled; two bounded interactive attempts timed out and one fail-fast attempt confirmed credentials unavailable; P04 product remains accepted and installed, but process closure is not yet remote
 - **Retained evidence:** P03/P04 designs and plans, this ledger, failed installed-run candidate SHA `c5d94cddb9e6122423b91066dba8d18d42cfc7e6`, and concise failed-run evidence in `AIRLOCK-E18`
 - **Temporary artifacts / processes:** all exact P03/P04 probe repos, manifests, runtime dirs, NDJSON, message/hooks files, sessions, verifier files, and `airlock-files-review` removed and verified absent; no known task-owned process remains
-- **Next action:** commit/push final C04 process Crossing and verify local/remote equality
+- **Next action:** restore GitHub HTTPS authentication, commit this checkpoint correction, push local `main`, and verify remote equals the resulting local HEAD
 
 ## Gate register
 
