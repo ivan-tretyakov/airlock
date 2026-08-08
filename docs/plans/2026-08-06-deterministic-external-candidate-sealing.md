@@ -149,15 +149,15 @@ Expected RED evidence is a precise assertion failure or unsupported-manifest cla
 
 ### Crossing 3 - Documentation, Release Source, And Source Proof
 
-- [ ] 23. Update root README, adapter README, and project conventions with argv-only validation, direct launcher invocation, Git sealing, hook/filter behavior, failure recovery, and exact operator prerequisites.
-- [ ] 24. Bump plugin and marketplace manifests from 1.3.0 to 1.3.1 without changing unrelated plugin inventory.
-- [ ] 25. Update the P04 ledger with P03 C04 failure evidence, `AIRLOCK-D02`, P04 lifecycle, gate register, current candidate, and one bounded Resume checkpoint; do not modify the historical P03 design/plan.
-- [ ] 26. Run all launcher tests and syntax checks against the complete candidate.
-- [ ] 27. Run strict Claude plugin validation and source plugin details; require version 1.3.1, five skills, ten agents, inherited orchestrator model, and revised routes.
-- [ ] 28. Run a source-plugin Fable-to-launcher-to-OpenCode writer smoke in exact disposable repo `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p04-source-writer`: one `owned.txt` edit, one launcher-sealed commit, exact Claude audit, and no raw event stream in orchestrator output.
-- [ ] 29. Run an independent cross-family security/process review of the frozen C01–C03 candidate, briefed to distrust command execution, Git hooks/filters, baseline preservation, race recovery, direct invocation, and cleanup.
-- [ ] 30. Run an independent verifier against the same frozen candidate: full launcher tests, strict plugin validation, documentation/agent consistency, source/global worker hash, source writer smoke evidence, and staged-name audit without editing source.
-- [ ] 31. Resolve blocking findings one at a time through Airlock debug/review as applicable, refresh stale evidence after any candidate-bearing change, remove exact source-smoke state, then checkpoint and ship C03.
+- [x] 23. Update root README, adapter README, and project conventions with argv-only validation, direct launcher invocation, Git sealing, hook/filter behavior, failure recovery, and exact operator prerequisites.
+- [x] 24. Bump plugin and marketplace manifests from 1.3.0 to 1.3.1 without changing unrelated plugin inventory.
+- [x] 25. Update the P04 ledger with P03 C04 failure evidence, `AIRLOCK-D02`, P04 lifecycle, gate register, current candidate, and one bounded Resume checkpoint; do not modify the historical P03 design/plan.
+- [x] 26. Run all launcher tests and syntax checks against the complete candidate.
+- [x] 27. Run strict Claude plugin validation and source plugin details; require version 1.3.1, five skills, ten agents, inherited orchestrator model, and revised routes.
+- [x] 28. Run a source-plugin Fable-to-launcher-to-OpenCode writer smoke in exact disposable repo `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p04-source-writer`: one `owned.txt` edit, one launcher-sealed commit, exact Claude audit, and no raw event stream in orchestrator output.
+- [x] 29. Run an independent cross-family security/process review of the frozen C01–C03 candidate, briefed to distrust command execution, Git hooks/filters, baseline preservation, race recovery, direct invocation, and cleanup.
+- [x] 30. Run an independent verifier against the same frozen candidate: full launcher tests, strict plugin validation, documentation/agent consistency, source/global worker hash, source writer smoke evidence, and staged-name audit without editing source.
+- [x] 31. Resolve blocking findings one at a time through Airlock debug/review as applicable, refresh stale evidence after any candidate-bearing change, remove exact source-smoke state, then checkpoint and ship C03.
 
 ### Crossing 4 - Publish, Install, Prove, And Accept
 

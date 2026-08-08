@@ -59,21 +59,21 @@
 - **Multi-Crossing reason:** launcher safety core, workflow adoption, release source, and installed activation are independently auditable layers of one repair.
 - **Rollback strategy:** disable/remove 1.3.1 activation and the global worker, then revert C03, C02, and C01 in reverse order without rewriting external or user history.
 - **Repairs:** `AIRLOCK-D02`; user-approved architecture reversal 2026-08-06
-- **Current candidate:** base `ed5309b` + staged product-diff hash `5821f9062d823e4e4cfb667af626ea7cc06a6a39`
+- **Current candidate:** base `ac4d396` + frozen C03 product-diff hash `8befff01c7d8de674ac33525b3f0474aa40df428`
 - **Accepted candidate:** none
 
 ## Resume checkpoint
 
 - **State:** active
 - **Updated:** 2026-08-06
-- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C02` ready to commit
-- **Completed:** C02 tasks 14–22, user checkpoint approval, exact staged-name audit, and product-diff identity
-- **Changed paths:** staged C02 launcher tests, canonical plan/ship/template, Claude agents, OpenCode worker, and P04 plan/ledger; byte-identical global worker activated; historical P03 plan remains preserved and unstaged
-- **Fresh evidence:** static RED 4/4 then GREEN 4/4; worker read-only RED reproduced preflight contract defect then GREEN; 81/81 launcher tests; syntax/diff checks; source/global SHA-256 `1226C89D…202B4`; OpenCode `airlock-worker` resolved primary; source launcher returned `done`, effective `openai/gpt-5.4-mini`, read 1/1, terminal stop, five headings, session `ses_02528746bffeWR287NZT1XWPIb` deleted
-- **Blockers / decisions:** no-write roles use launcher sealing permission `none`; writer roles allow one exact launcher candidate; first cleanup attempt failed because its shell cwd was inside the target, then exact retry from Airlock source removed and verified both paths
+- **Active pack / Crossing:** `AIRLOCK-P04` / `AIRLOCK-P04-C03` ready to commit and push
+- **Completed:** C03 tasks 23–31, all G21–G25 evidence, source cleanup, and user ship/push checkpoint approval
+- **Changed paths:** C03 launcher/tests regression fixes, root/adapter docs, conventions, manifests, P04 plan/ledger, and approved user-scoped Claude launcher rules; historical P03 plan remains preserved and unowned
+- **Fresh evidence:** frozen base `ac4d396` + product-diff `8befff01c7d8de674ac33525b3f0474aa40df428`; 85/85 tests in 186.8s; strict source 1.3.1 inventory; source writer candidate `1ea36067a28dc3aa67ad4099af3b5b5145bed6e3`, tree `4ec40fcbf56ec7c7ce296b01835865f12f3b16d4`; Fable direct launcher → effective `openai/gpt-5.4-mini`, policy `sha256:4f447744…84ad4`, apply_patch 1/1, validation exit 0, direct Git seal and exact audit; source/global worker hash equal
+- **Blockers / decisions:** no active blocker; G21–G25 passed for frozen diff `8befff01…df428`; persistent Claude rules use resolved source/installed cache paths; apply_patch evidence plus exact delta is a deliberate two-gate property
 - **Retained evidence:** P03/P04 designs and plans, this ledger, failed installed-run candidate SHA `c5d94cddb9e6122423b91066dba8d18d42cfc7e6`, and concise failed-run evidence in `AIRLOCK-E18`
-- **Temporary artifacts / processes:** C02 smoke repo, manifest, NDJSON, session, and OpenCode tool-output file removed and verified absent; exact P03 disposable repos `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-6c54d2c530574b778a3b28c16b26ee21` and `C:/Users/IVANTR~1/AppData/Local/Temp/opencode/airlock-p03-installed-e2e-d65ab1b7e04d4118b7fdf28aca6a3c8f` remain for P04 cleanup; no known task-owned process remains
-- **Next action:** commit `AIRLOCK-P04-C02`, verify source/global worker equality remains, then activate C03 tasks 23–31
+- **Temporary artifacts / processes:** source probe, manifests, runtime dirs, debug NDJSON, session, and verifier diff files removed and verified absent; P03 disposable repos and pre-existing `airlock-files-review` remain recorded for final P04 cleanup; no known task-owned process remains
+- **Next action:** exact stage/audit/commit C03, push C01–C03, verify remote equality, then activate C04
 
 ## Gate register
 
@@ -99,11 +99,11 @@
 | `AIRLOCK-G18` | `AIRLOCK-P03` | independent security/process review | required | passed | — | — | — | `AIRLOCK-E16` |
 | `AIRLOCK-G19` | `AIRLOCK-P03` | cleanup | required | pending | — | — | — | — |
 | `AIRLOCK-G20` | `AIRLOCK-P03` | publication and activation | required | passed | — | — | — | `AIRLOCK-E17` |
-| `AIRLOCK-G21` | `AIRLOCK-P04` | launcher contract and regression suite | required | pending | — | — | — | — |
-| `AIRLOCK-G22` | `AIRLOCK-P04` | canonical and agent consistency | required | pending | — | — | — | — |
-| `AIRLOCK-G23` | `AIRLOCK-P04` | independent security/process review | required | pending | — | — | — | — |
-| `AIRLOCK-G24` | `AIRLOCK-P04` | plugin and release validation | required | pending | — | — | — | — |
-| `AIRLOCK-G25` | `AIRLOCK-P04` | source end-to-end writer | required | pending | — | — | — | — |
+| `AIRLOCK-G21` | `AIRLOCK-P04` | launcher contract and regression suite | required | passed | — | — | — | `AIRLOCK-E19` |
+| `AIRLOCK-G22` | `AIRLOCK-P04` | canonical and agent consistency | required | passed | — | — | — | `AIRLOCK-E20` |
+| `AIRLOCK-G23` | `AIRLOCK-P04` | independent security/process review | required | passed | — | — | — | `AIRLOCK-E21` |
+| `AIRLOCK-G24` | `AIRLOCK-P04` | plugin and release validation | required | passed | — | — | — | `AIRLOCK-E22` |
+| `AIRLOCK-G25` | `AIRLOCK-P04` | source end-to-end writer | required | passed | — | — | — | `AIRLOCK-E23` |
 | `AIRLOCK-G26` | `AIRLOCK-P04` | installed end-to-end writer | required | pending | — | — | — | — |
 | `AIRLOCK-G27` | `AIRLOCK-P04` | publication and cleanup | required | pending | — | — | — | — |
 
@@ -129,6 +129,11 @@
 | `AIRLOCK-E16` | `AIRLOCK-G18` | frozen C03 working candidate after `819ce33` | `2026-08-06T12:26:34+02:00` | independent reviewer + verifier | `review-glm`; `verify` | `zai-coding-plan/glm-5.2`; `alibaba-token-plan/deepseek-v4-flash-0731` | full source/global diff review; 21 Node tests; syntax; strict plugin validation; config/agent/version/path/secret/cleanup audits | Airlock source, global worker, approved temp home | passed | no blocking/high finding; contract clean; residual `.err` found by verifier and removed by exact path before staging |
 | `AIRLOCK-E17` | `AIRLOCK-G20` | source/remote commit `0c441c248aa012f7669b11240784c1e910d60fda` | `2026-08-06T21:29:51+02:00` | orchestrator | installed Claude plugin | OpenCode orchestrator | local/remote SHA comparison; installed plugin details | GitHub tracking ref and user-scoped Claude installation | passed | local HEAD equals `origin/main`; installed Airlock 1.3.0 exposes five skills and ten agents |
 | `AIRLOCK-E18` | `AIRLOCK-G17` | installed 1.3.0; disposable baseline candidates including exact commit `c5d94cddb9e6122423b91066dba8d18d42cfc7e6` | `2026-08-06T21:29:51+02:00` | orchestrator + debug | installed `airlock:orchestrator` → `airlock:external-runner` → `airlock-worker` | Fable/high → Haiku/medium → `openai/gpt-5.4-mini`/none | repeated bounded installed writer dispatches; retained sanitized debug NDJSON then exact deletion; Git parent/count/path/message/index/content audits | exact P03 disposable repositories | failed | one run created and passed audit for the exact candidate but launcher blocked on an over-specified read event; other runs combined denied Git calls, preflight-blocked, or guessed a patch pre-image; prompt retries stopped and architecture moved to P04 |
+| `AIRLOCK-E19` | `AIRLOCK-G21` | base `ac4d396` + product-diff `8befff01c7d8de674ac33525b3f0474aa40df428` | `2026-08-07T11:05:51+02:00` | independent verifier | `verify` | `alibaba-token-plan/deepseek-v4-flash-0731` | `node --check`; full Node test suite | frozen Airlock source | passed | 85/85 tests in 129.3s; syntax clean |
+| `AIRLOCK-E20` | `AIRLOCK-G22` | same frozen candidate; global worker | `2026-08-07T11:05:51+02:00` | independent verifier | `verify` | `alibaba-token-plan/deepseek-v4-flash-0731` | canonical/agent searches; source/global SHA-256 | frozen source + user-scoped worker | passed | no active relay or worker-commit contradiction; byte-identical SHA-256 `1226C89D…202B4` |
+| `AIRLOCK-E21` | `AIRLOCK-G23` | base `ac4d396` + product-diff `8befff01c7d8de674ac33525b3f0474aa40df428` | `2026-08-07T11:05:51+02:00` | independent reviewer | `review-glm` | `zai-coding-plan/glm-5.2` | hostile full diff/security/process review | frozen C01–C03 candidate | passed | no blocker/high; argv, permissions, apply_patch+delta, validation mutation, hooks/filters, TOCTOU, recovery, retention, cleanup, and v1 read-only boundaries hold |
+| `AIRLOCK-E22` | `AIRLOCK-G24` | same frozen candidate | `2026-08-07T11:05:51+02:00` | independent verifier | `verify` | `alibaba-token-plan/deepseek-v4-flash-0731` | strict plugin validation, source details, JSON agreement | source plugin | passed | Airlock 1.3.1; five skills; ten agents; inherited orchestrator model |
+| `AIRLOCK-E23` | `AIRLOCK-G25` | source writer `a0cf7e1` → `1ea36067a28dc3aa67ad4099af3b5b5145bed6e3`, tree `4ec40fcbf56ec7c7ce296b01835865f12f3b16d4` | `2026-08-07T11:05:51+02:00` | orchestrator + independent verifier | source `airlock:orchestrator` → launcher → `airlock-worker`; `verify` | Fable/high → `openai/gpt-5.4-mini`/none; DeepSeek high | strict v2 source dispatch, deterministic validation/Git seal, independent Git/content audit | exact source disposable repo | passed | policy `sha256:4f447744…84ad4`; apply_patch 1/1; one exact candidate; session/artifacts and source probe removed/verified absent |
 
 ## Crossings
 
@@ -309,6 +314,20 @@
 - **Scope audit:** passed against amended C02 file contract; historical P03 plan diff excluded
 - **Pack lifecycle after Crossing:** active
 - **Deviations:** task 14 required the already-approved launcher test path omitted from the initial C02 row, so the plan mapping was corrected without widening overall scope; read-only launcher sealing permission was clarified to `none` after the real smoke caught an over-strict worker preflight
+
+### Crossing `AIRLOCK-P04-C03` — Release 1.3.1 source — 2026-08-07
+
+- **Delivery Pack:** `AIRLOCK-P04`
+- **Commit:** this commit (locate with `git log -S 'AIRLOCK-P04-C03' --oneline -- docs/ledger/2026-08-05-delivery-packs.md`)
+- **Candidate:** base `ac4d396` + staged product-diff hash `8befff01c7d8de674ac33525b3f0474aa40df428` (`git hash-object --stdin` over launcher/tests, release docs/conventions, and manifests)
+- **Owned:** launcher/tests regression fixes, root/adapter operator docs, conventions, plugin/marketplace 1.3.1 manifests, P04 plan/ledger, approved user-scoped Claude launcher rules, and exact source probe state
+- **Touched:** `scripts/run-external-agent.mjs`, `scripts/run-external-agent.test.mjs`, `README.md`, `adapters/opencode/README.md`, `PROJECT-CONVENTIONS.template.md`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, P04 plan, and this ledger; Claude settings outside Git
+- **External handoff audit:** source Fable invoked the strict launcher directly; selected/effective OpenCode `airlock-worker` on `openai/gpt-5.4-mini`/none; parent `a0cf7e1`, candidate `1ea36067a28dc3aa67ad4099af3b5b5145bed6e3`, tree `4ec40fcbf56ec7c7ce296b01835865f12f3b16d4`; exact message/path/content/index/status; policy `sha256:4f447744…84ad4` / `AIRLOCK-E12`; validation and direct Git sealing passed; session/artifacts removed
+- **Evidence:** `AIRLOCK-E19`…`AIRLOCK-E23`; 85/85 tests, strict 1.3.1 inventory, source/global worker equality, independent GLM review, DeepSeek verification, real Windows source writer seal, and `git diff --check` passed
+- **Artifacts / cleanup:** source/debug manifests, runtime dirs, NDJSON, sessions, verifier files, and source probe removed by exact path/ID; P03 disposables and `airlock-files-review` remain for final cleanup
+- **Scope audit:** passed against C03 release-source contract; historical P03 plan diff excluded
+- **Pack lifecycle after Crossing:** candidate
+- **Deviations:** approved scope amendment added narrow persistent Claude launcher rules; real runtime evidence added apply_patch mutation support, verified debug retention, and exact-owned derived Windows permission aliases before freeze; all affected gates rerun
 
 ## Open items
 

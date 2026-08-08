@@ -59,12 +59,15 @@ in it, brainstorm.
   configured agents and models; state the independent-review policy and accepted downgrade>`
 - **Allowed external runtimes:** `<runtime names permitted here; state none when external dispatch is forbidden>`
 - **External route mapping:** `<runtime → approved agent/model/variant mapping; every external plan route names runtime, agent, model, and variant>`
-- **External worker commit permission:** `<none, or one scoped product candidate commit; state that the orchestrator owns the ledger Crossing>`
+- **External worker commit permission:** `<none; worker owns scoped edits/exploration only, launcher may seal one exact candidate, and the orchestrator owns the ledger Crossing>`
 - **External foreground timeout:** `<per-route maximum duration and exact timeout/stop handling>`
 - **External temp/session/evidence homes:** `<exact approved temporary, session, and retained-evidence homes; exact-ID/path cleanup policy>`
 - **External writers on the active branch:** `<allowed or forbidden; if allowed, serialize writers per checkout and prohibit orchestrator checkout activity during dispatch>`
-- **External launcher + Node:** `<Node prerequisite and the approved ${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs manifest/hash invocation>`
-- **External runtime executable:** `<required direct executable; on Windows state the direct .exe path/provider and whether shell shims fail closed>`
+- **External launcher + Node:** `<Node prerequisite; direct one-time ${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs --manifest <absolute-json-path> --sha256 <lowercase-hex> invocation; no relay, retry, resume, or checkout activity while it runs>`
+- **External runtime and Git executables:** `<required direct OpenCode and Git executables; on Windows state direct .exe paths/providers and that PowerShell/npm command shims fail closed>`
+- **External deterministic validations:** `<ordered direct executable + argv arrays, shell: false, checkout-contained working directories, timeouts/output bounds/expected exits, and no validation-created delta>`
+- **External launcher sealing:** `<structured branch/HEAD/index/status/hash baseline; custom-filter rejection; verified empty hooks directory; signing disabled; exact staging/cached diff-check/one-commit audit; no reset, amend, rebase, clean, or history rewrite>`
+- **External recovery:** `<missing-summary quiescence check; no-commit/no-candidate, one-commit/independent-audit, and indeterminate classifications; cleanup failure after commit preserves the commit and blocks acceptance>`
 - **Stochastic/tuning verification:** `<e.g. never judge balance from one run — use N-seed distributions via
   the harness at tools/harness>`
 - **Generated-asset provenance:** `<e.g. all AI images go through tools/gen_art.py; each appends a row to

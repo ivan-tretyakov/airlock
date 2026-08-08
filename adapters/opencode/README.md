@@ -16,18 +16,18 @@ This proves only the installed agent's static resolution. It does not prove the 
 
 ### Deterministic launcher bridge
 
-Node.js is required. The Claude bridge never constructs an OpenCode command, policy, prompt, retry, cleanup operation, or process termination itself. It invokes the bundled launcher exactly once:
+Node.js, a direct Git executable, and the OpenCode CLI with the selected provider/model are required. The Claude orchestrator never constructs an OpenCode command, launcher-internal Git command, validation command, policy, retry, cleanup operation, or process termination itself. It invokes the bundled launcher directly and exactly once:
 
 ```text
 node "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs" \
   --manifest <absolute-manifest.json> --sha256 <lowercase-hex>
 ```
 
-The orchestrator creates the secret-free manifest, hashes its exact bytes, records it as task-owned temporary state, and supplies the path/hash plus approved route reference to the bridge. The launcher validates the hash and emits one JSON summary with schema `airlock.external-agent-result/v1`, including status/classification/action, selected/effective route, session, process, event evidence, policy, and cleanup facts. A bridge reports `done` only for a launcher `done`; it propagates a blocked classification and exact action without retrying.
+The orchestrator creates the secret-free manifest, hashes its exact bytes, and records it as task-owned temporary state. The launcher validates the hash and emits one bounded JSON summary with schema `airlock.external-agent-result/v1`, including status/classification/action, selected/effective route, session, process, event evidence, policy, validation, candidate, recovery, and cleanup facts. `agents/external-runner.md` is superseded compatibility documentation; it makes no tool call or dispatch.
 
-The manifest schema is `airlock.external-agent/v1` and has exactly `schema`, `runtime`, `packId`, `crossingId`, `route`, `prompt`, `opencode`, `timeoutMs`, `evidencePath`, `expected`, `cleanup`, `retention`, and `policy`. Its nested route, expected, cleanup, retention, and policy fields are the approved launch contract; unknown fields, secrets, or a non-lowercase SHA-256 fail closed. The launcher owns foreground invocation, evidence parsing, effective-identity export, exact session/file cleanup, and absence verification.
+The writer manifest schema is `airlock.external-agent/v2` and strictly pins the route, structured baseline, exact owned paths, ordered validations, launcher commit contract, artifacts, expected mutation, cleanup, retention, and policy fields. Unknown fields, secrets, non-lowercase SHA-256 values, shell command strings, checkout escapes, and omitted required fields fail closed. Every mandatory validation supplies a direct executable, argv array, checkout-contained working directory, timeout, output bounds, and expected exit; the launcher invokes it with `shell: false` and rejects any validation-created delta.
 
-The launcher enforces the approved foreground timeout, serializes file-writing runs per checkout, and leaves the orchestrator idle in that checkout until return. Read-only runs may overlap only when they cannot contend for mutable state. On Windows it resolves only a direct `opencode.exe`, including the supported npm-installed executable; PowerShell/npm command shims fail closed.
+The launcher enforces the approved foreground timeout, serializes file-writing runs per checkout, and leaves the orchestrator idle in that checkout until return. Read-only runs may overlap only when they cannot contend for mutable state. On Windows it resolves only direct `opencode.exe` (including the supported npm-installed executable) and `git.exe`; PowerShell/npm command shims fail closed.
 
 Run its dependency-free checks with:
 
@@ -55,13 +55,15 @@ The launcher owns exact session export, deletion, and absence verification accor
 
 ### Candidate commit and audit
 
-Before dispatch, the orchestrator records the branch, full `HEAD`, empty cached diff, complete `git status --short`, clean owned paths, and effective policy proof. With no commit permission the worker neither stages nor commits. With permission for one candidate, it may create at most one product commit, stages only explicit owned paths, audits `git diff --cached --name-status`, includes the exact Crossing ID in the message, and never edits process artifacts or pushes, publishes, amends, resets, rebases, or merges.
+Before dispatch, the orchestrator records the branch, full `HEAD`, empty real index, complete structured porcelain-v2 status, clean owned-path hashes, baseline-dirty-path hashes, and effective policy proof. The worker may make only scoped edits and approved exploratory checks; it cannot write Git state or claim a candidate. The launcher requires declared successful mutation evidence, then proves the delta is all and only the exact candidate paths while preserving baseline-dirty paths.
 
-After return, the orchestrator verifies the recorded parent, exactly one commit, candidate/tree and message, complete changed-name set, empty index, full status delta, effective route, evidence, and exact cleanup. A mismatch stops without rewriting history. The orchestrator alone owns the ledger/Crossing commit and any push or publication.
+The launcher runs all mandatory validations after the worker and before staging. It resolves Git directly, rejects custom `filter` attributes on every owned path, creates and verifies an empty task-owned hooks directory, writes and round-trips the approved message file, stages exact modified/added/deleted paths, audits cached names and cached `diff --check`, and commits with the empty hooks path and signing disabled. It rechecks branch, `HEAD`, index, status, and hashes immediately before staging and commit, then proves one child commit, exact parent/message/tree/path set, empty index, and preserved status. It never uses broad pathspecs, resets, amends, rebases, cleans, or otherwise rewrites history.
+
+After a bounded `done` summary, the orchestrator independently verifies the launcher-sealed candidate and all exact cleanup before it creates the separate ledger/Crossing commit, pushes, or publishes. For a missing or malformed summary, first prove the exact launcher process tree is quiescent, then inspect only against the recorded baseline: unchanged `HEAD` with confined owned edits is the no-commit state (`no_candidate_sealed`); one exact child with the manifest message/path set is the one-commit state (`candidate_sealed_requires_audit`); every other state is indeterminate and stops without cleanup or history rewriting. A cleanup failure after a commit preserves the commit and blocks acceptance.
 
 ### Security and cleanup boundary
 
-The worker is a user-account process with advisory model instructions plus deterministic permissions and post-return audits. These guardrails limit and detect ordinary scope drift; they are not adversarial isolation. Never inspect credentials, authentication files, environment values, browser state, or unrelated user state. On blocked or partial runs, stop/remove only exact attributable owned processes and paths; leave unknown or pre-existing state untouched and report it.
+The worker is a user-account process with advisory model instructions plus deterministic permissions and post-return audits. These guardrails limit and detect ordinary scope drift; they are not adversarial isolation. Never inspect credentials, authentication files, environment values, browser state, or unrelated user state. The launcher deletes and verifies only exact declared session, manifest, evidence, message, hooks, and temporary-directory paths after extracting its summary. On blocked, partial, unknown, or cleanup-failed runs, leave unknown or pre-existing state untouched and report it.
 
 ## Use this checkout
 

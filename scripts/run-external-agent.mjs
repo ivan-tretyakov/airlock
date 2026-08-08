@@ -187,7 +187,7 @@ export const MANIFEST_SCHEMA = deepFreeze({
     runtime: ["opencode"],
     workerStatus: ["done", "partial", "blocked"],
     pathState: ["file", "absent", "symlink"],
-    mutationTool: ["edit", "write"],
+    mutationTool: ["apply_patch", "edit", "write"],
     retention: ["temporary", "retained"],
     transcriptRetention: ["none"],
   },
@@ -529,6 +529,15 @@ function validateWorkerPermissions(value) {
       ),
     ),
   );
+  const allowedOwnedAliases = new Set(
+    value.ownedPaths.flatMap((relativePath) => {
+      const nativePath = relativePath.replaceAll(
+        "/",
+        pathImplementationFor(value.route.targetDirectory).sep,
+      );
+      return [relativePath, `*${relativePath}`, nativePath, `*${nativePath}`];
+    }),
+  );
   const readAllows = permissionEntries(permission.read)
     .filter(([, decision]) => decision === "allow")
     .map(([selector]) => selector);
@@ -538,8 +547,9 @@ function validateWorkerPermissions(value) {
 
   for (const selector of [...readAllows, ...editAllows]) {
     if (
-      !isAbsolutePath(selector) ||
-      !pathIsInside(value.route.targetDirectory, selector) ||
+      (!isAbsolutePath(selector) && !allowedOwnedAliases.has(selector)) ||
+      (isAbsolutePath(selector) &&
+        !pathIsInside(value.route.targetDirectory, selector)) ||
       /(?:^|[\\/])(?:\.env[^\\/]*|[^\\/]*(?:credential|secret|token|password)[^\\/]*)$/i.test(
         selector,
       )
@@ -547,8 +557,13 @@ function validateWorkerPermissions(value) {
       fail("manifest_permission_not_total");
     }
   }
-  const canonicalReads = new Set(readAllows.map(canonicalAbsolutePath));
-  const canonicalEdits = editAllows.map(canonicalAbsolutePath).sort(compareStrings);
+  const canonicalReads = new Set(
+    readAllows.filter(isAbsolutePath).map(canonicalAbsolutePath),
+  );
+  const canonicalEdits = editAllows
+    .filter(isAbsolutePath)
+    .map(canonicalAbsolutePath)
+    .sort(compareStrings);
   if (expectedOwned.some((ownedPath) => !canonicalReads.has(ownedPath))) {
     fail("manifest_permission_not_total");
   }
@@ -868,11 +883,15 @@ function validateWriterManifest(value, { manifestPath } = {}) {
   );
   for (const mutation of value.expected.mutations) {
     exactKeys(mutation, MANIFEST_SCHEMA.keys.mutation);
+    const validInput =
+      mutation.tool === "apply_patch"
+        ? isRecord(mutation.input) && Object.keys(mutation.input).length === 0
+        : isRecord(mutation.input) &&
+          isAbsolutePath(mutation.input.filePath) &&
+          absoluteOwned.has(canonicalAbsolutePath(mutation.input.filePath));
     if (
       !MANIFEST_SCHEMA.enums.mutationTool.includes(mutation.tool) ||
-      !isRecord(mutation.input) ||
-      !isAbsolutePath(mutation.input.filePath) ||
-      !absoluteOwned.has(canonicalAbsolutePath(mutation.input.filePath)) ||
+      !validInput ||
       !Number.isSafeInteger(mutation.minimum) ||
       mutation.minimum < 1 ||
       mutation.minimum > 100
@@ -911,10 +930,7 @@ function validateWriterManifest(value, { manifestPath } = {}) {
       fail("manifest_retention_invalid");
     }
   }
-  if (
-    value.retention.transcript !== "none" ||
-    value.retention.temporaryDirectory !== "temporary"
-  ) {
+  if (value.retention.transcript !== "none") {
     fail("manifest_retention_invalid");
   }
 
@@ -3013,7 +3029,7 @@ async function cleanupWriterRuntime(
     }
   }
 
-  let temporaryRemoved = true;
+  let temporaryRemoved = false;
   if (!runtimeDirectoryCreated) {
     for (const [summaryField, artifactField] of [
       ["temporaryDirectory", "temporaryDirectory"],
@@ -3031,14 +3047,12 @@ async function cleanupWriterRuntime(
         verified: true,
       };
     }
-  } else {
-    if (manifest.cleanup.temporaryDirectory) {
+  } else if (manifest.cleanup.temporaryDirectory) {
       temporaryRemoved = await removeAndVerifyExactDirectory(
         manifest.artifacts.temporaryDirectory,
         dependencies,
       );
       if (!temporaryRemoved) failures.push("temporary_cleanup_failed");
-    }
     summary.cleanup.temporaryDirectory = {
       path: manifest.artifacts.temporaryDirectory,
       state: temporaryRemoved ? "deleted" : "failed",
@@ -3055,6 +3069,37 @@ async function cleanupWriterRuntime(
           ? "deleted-with-temporary-directory"
           : "retained-cleanup-failed",
         verified: temporaryRemoved,
+      };
+    }
+  } else {
+    const temporaryInformation = await pathInformation(
+      manifest.artifacts.temporaryDirectory,
+      dependencies.lstat,
+    );
+    const retained = Boolean(
+      temporaryInformation.exists &&
+        temporaryInformation.stat.isDirectory() &&
+        !temporaryInformation.stat.isSymbolicLink(),
+    );
+    if (!retained) failures.push("temporary_cleanup_failed");
+    summary.cleanup.temporaryDirectory = {
+      path: manifest.artifacts.temporaryDirectory,
+      state: retained ? "retained" : "retention-failed",
+      verified: retained,
+    };
+    for (const [summaryField, artifactField] of [
+      ["evidence", "evidencePath"],
+      ["message", "messagePath"],
+      ["hooksDirectory", "hooksDirectory"],
+    ]) {
+      const information = await pathInformation(
+        manifest.artifacts[artifactField],
+        dependencies.lstat,
+      );
+      summary.cleanup[summaryField] = {
+        path: manifest.artifacts[artifactField],
+        state: information.exists ? "retained" : "not-created",
+        verified: retained,
       };
     }
   }

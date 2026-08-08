@@ -874,6 +874,33 @@ test("writer manifest accepts the strict structured sealing contract", async (t)
   );
 });
 
+test("writer manifest accepts observed OpenCode apply_patch mutation evidence", async (t) => {
+  const paths = await makeTemporaryTree(t);
+  const manifest = makeWriterManifest(paths, {
+    expected: {
+      mutations: [{ tool: "apply_patch", input: {}, minimum: 1 }],
+    },
+  });
+
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+});
+
+test("writer manifest permits an explicitly retained debug runtime directory", async (t) => {
+  const paths = await makeTemporaryTree(t);
+  const manifest = makeWriterManifest(paths, {
+    cleanup: { temporaryDirectory: false },
+    retention: { temporaryDirectory: "retained" },
+  });
+
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+});
+
 test("writer manifest rejects unknown keys at every exact schema boundary", async (t) => {
   const paths = await makeTemporaryTree(t);
   const rootUnknown = { ...makeWriterManifest(paths), unexpected: true };
@@ -1219,6 +1246,39 @@ test("writer permissions never grant a Git write command", async (t) => {
   assert.throws(
     () => validateManifest(wrappedGit, { manifestPath: paths.manifestPath }),
     (error) => error.code === "manifest_permission_git_write",
+  );
+});
+
+test("writer permissions allow only derived Windows matcher aliases for owned paths", async (t) => {
+  const paths = await makeTemporaryTree(t);
+  const manifest = makeWriterManifest(paths);
+  const originalIdentity = manifest.policy.identity;
+  for (const tool of ["read", "edit"]) {
+    manifest.opencode.permission[tool]["owned.txt"] = "allow";
+    manifest.opencode.permission[tool]["*owned.txt"] = "allow";
+  }
+  manifest.policy.identity = computePolicyIdentity(
+    manifest.opencode.config,
+    manifest.opencode.permission,
+  );
+  manifest.prompt = manifest.prompt.replace(
+    originalIdentity,
+    manifest.policy.identity,
+  );
+
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+
+  manifest.opencode.permission.edit["*other.txt"] = "allow";
+  manifest.policy.identity = computePolicyIdentity(
+    manifest.opencode.config,
+    manifest.opencode.permission,
+  );
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_permission_not_total",
   );
 });
 
@@ -2028,6 +2088,24 @@ test("successful sealing removes exact session, manifest, evidence, message, and
   assert.equal(await exists(manifest.artifacts.messagePath), false);
   assert.equal(await exists(manifest.artifacts.hooksDirectory), false);
   assert.equal(await readFile(unrelatedPath, "utf8"), "preserve\n");
+});
+
+test("approved debug retention preserves and verifies the exact runtime directory", async (t) => {
+  const { paths, manifest } = await makeSealingRepository(t);
+  manifest.cleanup.temporaryDirectory = false;
+  manifest.retention.temporaryDirectory = "retained";
+  const runtime = fakeWriterRuntime(manifest);
+  runtime.dependencies.runValidationProcess = async () => processResult();
+
+  const summary = await executeWriterManifest(paths, manifest, runtime.dependencies);
+
+  assert.equal(summary.status, "done");
+  assert.equal(summary.cleanup.temporaryDirectory.state, "retained");
+  assert.equal(summary.cleanup.temporaryDirectory.verified, true);
+  assert.equal(summary.cleanup.evidence.state, "retained");
+  assert.equal(summary.cleanup.evidence.verified, true);
+  assert.equal(await exists(manifest.artifacts.temporaryDirectory), true);
+  assert.equal(await exists(manifest.artifacts.evidencePath), true);
 });
 
 test("unknown cleanup process state retains exact artifacts after a successful commit", async (t) => {
