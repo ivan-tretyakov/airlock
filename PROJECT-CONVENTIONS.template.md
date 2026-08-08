@@ -2,35 +2,23 @@
 
 The `airlock` skills are deliberately engine- and language-agnostic. They refer to "the project's test command", "the project's architecture invariants", and so on — **this file is where you supply those specifics.**
 
-Copy the block below into your project's instruction file (`CLAUDE.md` for Claude Code, `AGENTS.md` for OpenCode), fill in the angle-bracket parts, and delete any line that doesn't apply. Every line you fill in is a line the skills stop having to guess about.
+Copy the block below into your project's instruction file (`CLAUDE.md` for Claude Code/Cowork projects, `AGENTS.md` for OpenCode), fill in the angle-bracket parts, and delete any line that doesn't apply. Every line you fill in is a line Airlock stops having to guess about.
 
 ---
 
 ```markdown
-## Process: the airlock flow (non-negotiable)
+## Process: Airlock is opt-in
 
-One door at a time — for any substantial change (a feature, a system, a redesign, a non-trivial bug fix),
-route it through the `airlock` plugin skills. Do **not** author specs or jump to code directly.
+Airlock is inactive in normal chats. Use it only after the user invokes `/airlock:start` (Claude Code or
+Cowork), `/airlock-start` (OpenCode), or explicitly launches `airlock:orchestrator` as the main agent.
+Project `.airlock/config.json` selects `native` or `opencode`; it never activates Airlock.
 
-1. **Airlock `brainstorm` FIRST** (`/airlock:brainstorm` in Claude Code, `/airlock-brainstorm` in OpenCode) — before any spec, plan, or code. The design + scope gate: approaches →
-   design → approval *before* work is committed. Every design doc carries a **scope contract** (deliverable +
-   exact path, integration stance stated out loud, may/must-not-touch, high-level plan). **No file-writing
-   subagent runs without a signed-off scope** — the test is "will a subagent write files?", not "is this
-   substantial?". Small/standalone work uses the **lite lane**: just the scope contract, approved inline.
-2. **Airlock `plan`** — approved design → independently useful **Delivery Packs**, contiguous buildable
-   commit Crossings, disjoint file contracts, host-agent/model routing, and planner-selected evidence gates.
-   The user approves each pack's split, routing, and gates. Subagent prompts restate the file contract
-   **verbatim** with a STOP rule; the orchestrator audits the attributable changed-path delta after return.
-3. **Airlock `ship`** — seals one buildable Crossing using the final staged diff and exact-candidate evidence.
-   A pack spanning several Crossings remains active until its final candidate passes every required unwaived
-   gate. Each Crossing and pack state is recorded in the work's ledger.
-4. **Airlock `review`** — the far door. Feedback on shipped work is **triaged before it is fixed**, resolved
-   one item at a time against a known baseline, and recorded on the ledger with a checkable commit reference.
-   State lives in the ledger, not the conversation, so a fresh session resumes cold.
-5. **Airlock `debug`** for non-trivial bugs.
+Airlock classifies work as Quick, Compact, or Full. Quick uses exactly one leaf worker end-to-end and
+creates no design, plan, ledger, Crossing, or review artifacts. Full uses the explicit brainstorm, plan,
+ship, review, and debug commands. `/airlock:stop` ends command-activated mode.
 
-Trivial mechanical edits (a one-line swap, a config value) can be direct — but if there's a design choice
-in it, brainstorm.
+Only the main session delegates. Every worker is a leaf. Ask before each Fable leaf invocation, including
+when the main session uses Fable or an earlier Fable leaf was approved.
 
 ## Project specifics (airlock reads these)
 
@@ -56,7 +44,8 @@ in it, brainstorm.
 - **Live integration and cleanup:** `<approved throwaway target, allowed mutations, rollback/cleanup, and
   evidence that cleanup succeeded>`
 - **Host routing:** `<map Light/Standard/Complex/Critical + investigator/verifier/reviewer/visual roles to
-  configured agents and models; state the independent-review policy and accepted downgrade>`
+   configured agents and models; state the independent-review policy and accepted downgrade>`
+- **Airlock runtime:** `<native or opencode; missing .airlock/config.json means native and does not activate Airlock>`
 - **Allowed external runtimes:** `<runtime names permitted here; state none when external dispatch is forbidden>`
 - **External route mapping:** `<runtime → approved agent/model/variant mapping; every external plan route names runtime, agent, model, and variant>`
 - **External worker commit permission:** `<none; worker owns scoped edits/exploration only, launcher may seal one exact candidate, and the orchestrator owns the ledger Crossing>`

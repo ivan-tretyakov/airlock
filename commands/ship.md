@@ -1,6 +1,5 @@
 ---
-name: ship
-description: Ships one scope-audited, buildable Crossing and records exact-candidate evidence. On a Delivery Pack’s final Crossing, accepts the pack only after fresh required gates or explicit waivers. Use at every planned commit boundary or when asked to wrap up/commit; preserve protected state and project commit policy.
+description: Ship an explicit Full Airlock Crossing
 ---
 
 # Ship — seal one Crossing with evidence
@@ -104,7 +103,7 @@ Failed, blocked, or stale required evidence stops acceptance. Do not invent a pa
 
 ## 5. Record the Crossing and pack state
 
-Use the exact ledger path from the plan; initialize it from `LEDGER.template.md` beside this skill when needed. Record:
+Use the exact ledger path from the plan; initialize it from `${CLAUDE_PLUGIN_ROOT}/references/LEDGER.template.md` when needed. Record:
 
 ```markdown
 ### Crossing `<crossing-id>` — `<name>` — `<YYYY-MM-DD>`
@@ -136,15 +135,7 @@ Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recomp
 - Verify with `git show --stat --oneline HEAD`.
 - Do not call an active pack accepted.
 
-Use this exact five-bullet shape for every ship report:
-
-- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
-- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
-- **Evidence:** exact command/tool and result; name anything required but not run.
-- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
-- **Action needed:** `none` or one exact decision, blocker, or next action.
-
-Return only those bullets, using facts and actions. Put Crossing/pack IDs, SHA or candidate identity, gate states/waivers, deviations, and skipped checks under the applicable bullet. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.
+Lead with the shipped outcome. Include Crossing/pack IDs, SHA or candidate identity, gate states/waivers, deviations, skipped checks, and cleanup only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
 
 ## Legacy 1.1 compatibility
 

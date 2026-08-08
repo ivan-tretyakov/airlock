@@ -1,6 +1,6 @@
 # OpenCode adapter
 
-Airlock's canonical workflow lives in `skills/`. The OpenCode adapter adds namespaced wrapper skills and explicit commands; it does not duplicate the workflow bodies.
+Airlock's canonical Full workflow lives in `commands/`. OpenCode uses explicit commands only; no Airlock skill is registered for automatic selection.
 
 ## External-runtime worker
 
@@ -35,7 +35,7 @@ Run its dependency-free checks with:
 node --test scripts/run-external-agent.test.mjs
 ```
 
-For each process, the launcher sets non-secret `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` values from the manifest rather than relying on ambient defaults. The successful inline-config probe used exactly these non-secret keys: `$schema`, `autoupdate`, `snapshot`, `share`, `default_agent`, `model`, `small_model`, `subagent_depth`, `instructions`, `lsp`, `formatter`, and `compaction`. Route-specific model values must agree with the manifest route. That successful object did not include an `mcp` key; `--pure` plus the total tool policy denies unapproved plugin, MCP, and custom tools.
+For each process, the launcher sets non-secret `OPENCODE_CONFIG_CONTENT` and `OPENCODE_PERMISSION` values from the manifest rather than relying on ambient defaults. The config must set `subagent_depth: 0`; the launcher rejects every other value. Route-specific model values must agree with the manifest route. `--pure` plus the total tool policy denies unapproved plugin, MCP, and custom tools.
 
 Construct the last-match-wins permission policy in this order:
 
@@ -67,36 +67,26 @@ The worker is a user-account process with advisory model instructions plus deter
 
 ## Use this checkout
 
-This repository's [`opencode.json`](../../opencode.json) registers `adapters/opencode/skills/`. Those wrappers delegate to the canonical workflows in the root `skills/` directory, while `.opencode/command/` supplies:
+This repository's `.opencode/command/` directory supplies explicit commands that read the canonical command files:
 
+- `/airlock-start`
+- `/airlock-stop`
+- `/airlock-setup`
 - `/airlock-brainstorm`
 - `/airlock-plan`
 - `/airlock-ship`
 - `/airlock-review`
 - `/airlock-debug`
 
-Restart OpenCode after changing skills, commands, or configuration because they are loaded at startup.
+Restart OpenCode after changing commands or configuration because they are loaded at startup. Airlock remains inactive until `/airlock-start` is invoked.
 
 A registered source path loads current working-tree files, including uncommitted changes; it is not restricted to Git HEAD and does not fetch from remote. Keep the checkout reviewed and update it explicitly.
 
 ## Use Airlock in another project
 
-Clone Airlock to a stable location, then add its absolute skill path to that project's `opencode.json` or the global `~/.config/opencode/opencode.json`:
+Clone Airlock to a stable location, then install host-local copies of `.opencode/command/airlock-*.md` that reference that checkout's absolute `commands/` paths. Do not register an Airlock skill path globally: that would make the workflow eligible for automatic selection.
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "skills": {
-    "paths": [
-      "C:/path/to/airlock/adapters/opencode/skills"
-    ]
-  }
-}
-```
-
-OpenCode can auto-select the namespaced `airlock-*` skills from their descriptions. To install the explicit commands too, copy `.opencode/command/airlock-*.md` into the consuming project's `.opencode/command/` directory or the global OpenCode command directory.
-
-The supplied commands inherit the active primary agent. Run them from an orchestration-capable primary agent. If one installation must guarantee a specific primary, add `agent: <name>` to host-local command copies or set `default_agent`; Airlock does not pin a non-portable global agent name in distributed commands.
+The commands inherit the active primary agent. Run `/airlock-start` from an orchestration-capable primary agent. External OpenCode workers are separate and always deny `task`.
 
 ## Project conventions
 

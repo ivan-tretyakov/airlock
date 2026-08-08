@@ -184,6 +184,7 @@ function makeManifest(paths, overrides = {}) {
     autoupdate: false,
     default_agent: route.agent,
     model: route.model,
+    subagent_depth: 0,
     instructions: ["CONFIG_VALUE_MUST_NOT_BE_PRINTED"],
     ...overrides.config,
   };
@@ -277,6 +278,7 @@ function makeWriterManifest(paths, overrides = {}) {
     autoupdate: false,
     default_agent: route.agent,
     model: route.model,
+    subagent_depth: 0,
     instructions: ["CONFIG_VALUE_MUST_NOT_BE_PRINTED"],
     ...overrides.config,
   };
@@ -404,9 +406,7 @@ async function writeHashedManifest(paths, manifest) {
 function workerReport(status) {
   return [
     `- **Status:** ${status}, worker result.`,
-    "- **Changes/findings:** none.",
-    "- **Evidence:** focused check passed.",
-    `- **Artifacts/cleanup:** session ${SESSION_ID}.`,
+    `- **Evidence:** focused check passed; session ${SESSION_ID}.`,
     "- **Action needed:** none.",
   ].join("\n");
 }
@@ -698,9 +698,9 @@ const CANONICAL_SOURCE = Object.freeze({
     "../adapters/opencode/agents/airlock-worker.md",
     import.meta.url,
   ),
-  plan: new URL("../skills/plan/SKILL.md", import.meta.url),
-  ship: new URL("../skills/ship/SKILL.md", import.meta.url),
-  ledger: new URL("../skills/ship/LEDGER.template.md", import.meta.url),
+  plan: new URL("../commands/plan.md", import.meta.url),
+  ship: new URL("../commands/ship.md", import.meta.url),
+  ledger: new URL("../references/LEDGER.template.md", import.meta.url),
 });
 
 async function readCanonicalSource(source) {
@@ -871,6 +871,16 @@ test("writer manifest accepts the strict structured sealing contract", async (t)
   assert.equal(
     validateManifest(manifest, { manifestPath: paths.manifestPath }),
     manifest,
+  );
+});
+
+test("writer manifest requires zero nested subagent depth", async (t) => {
+  const paths = await makeTemporaryTree(t);
+  const manifest = makeWriterManifest(paths, { config: { subagent_depth: 1 } });
+
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_opencode_invalid",
   );
 });
 

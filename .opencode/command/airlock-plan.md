@@ -2,6 +2,6 @@
 description: Turn an approved Airlock design into an executable plan.
 ---
 
-Use the skill tool to load `airlock-plan`, then follow it for this request:
+Read `commands/plan.md` from the Airlock source checkout and follow it for this request:
 
 $ARGUMENTS

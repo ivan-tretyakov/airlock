@@ -1,6 +1,5 @@
 ---
-name: review
-description: Post-ship Airlock review for Delivery Packs. Loads ledger state, links feedback to a pack/Crossing/gate, triages before repair, and routes accepted fixes through linked repair packs with checkable evidence. Use for user, PR, CI, or reviewer feedback after a commit, or to resume shipped work. Legacy 1.1 ledgers remain readable without invented gate evidence.
+description: Review explicit Full Airlock work
 ---
 
 # Review — the far door
@@ -71,15 +70,7 @@ Resolve MUST_FIX before SHOULD_FIX. Make the smallest change, keep a regression 
 - Reply to and resolve remote threads when authenticated tooling supports it; otherwise report the unresolved remote action.
 - Ensure `ship` closes the Resume checkpoint at repair-pack acceptance and references its final Crossing; otherwise leave one exact next action for unfinished review.
 
-Use this exact five-bullet shape for every review report:
-
-- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
-- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
-- **Evidence:** exact command/tool and result; name anything required but not run.
-- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
-- **Action needed:** `none` or one exact decision, blocker, or next action.
-
-Return only those bullets, using facts and actions. Put resolved, rejected, parked, repair-pack links, failed/stale gates, waivers, and uncollected sources under the applicable bullet. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.
+Lead with findings, ordered by severity. Include resolved, rejected, parked, repair-pack links, failed/stale gates, waivers, and uncollected sources only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
 
 ## Stop conditions
 

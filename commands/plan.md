@@ -1,6 +1,5 @@
 ---
-name: plan
-description: Turns an approved design into a test-first Delivery Pack plan with contiguous scope-audited Crossings, disjoint file contracts, portable work classes and host roles, host-routing mappings, and planner-selected gates. Gets per-pack routing and gate approval before implementation. Requires approved scope; otherwise invoke brainstorm.
+description: Plan an approved Full Airlock delivery
 ---
 
 # Plan — approved design → verifiable Delivery Packs
@@ -150,15 +149,7 @@ A Light, single-Crossing pack may use one compact route row and only its genuine
 
 ## Concise return contract
 
-Use this exact five-bullet shape for every dispatch return and orchestrator report:
-
-- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
-- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
-- **Evidence:** exact command/tool and result; name anything required but not run.
-- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
-- **Action needed:** `none` or one exact decision, blocker, or next action.
-
-Return only those bullets, using facts and actions. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.
+Lead with the result. Return changed paths and actual evidence only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
 
 ## Dispatch protocol
 
@@ -172,7 +163,7 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 >
 > **STOP rule:** if the task appears to require any path outside the allowlist, **STOP and report back. Do not edit it.** A blocked task reported honestly is a success; widened scope is not.
 
-Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the concise return contract above. For a launcher-sealed external writer route, restate worker commit permission `none`, launcher sealing permission, the exact Crossing ID/message bytes/hash/candidate path set, and that the worker must make no candidate-commit claim. Require the agent to classify every non-product artifact it creates:
+Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the concise return contract above. Every worker is a leaf: do not give it `Agent`, `Task`, workflow, or external-delegation tools. Never route a leaf to Fable without fresh user approval immediately before that individual dispatch, including when the main session uses Fable or an earlier Fable leaf was approved. Record the approval in the dispatch prompt. For a launcher-sealed external writer route, restate worker commit permission `none`, launcher sealing permission, the exact Crossing ID/message bytes/hash/candidate path set, and that the worker must make no candidate-commit claim. Require the agent to classify every non-product artifact it creates:
 
 - **Retained evidence:** move file-based evidence to the project-configured evidence home under a stable exact path when that path is allowlisted, and return the intended ledger/gate reference. Otherwise return the exact source path for an orchestrator-owned move without widening scope.
 - **Temporary:** return every exact task-owned path/process and remove or stop it before returning when ownership is certain and cleanup is safe.

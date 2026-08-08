@@ -1,6 +1,5 @@
 ---
-name: debug
-description: Pack-aware systematic debugging for unclear failures and regressions. Reproduces, isolates, tests one hypothesis, records the failed Delivery Pack/gate and affected gates to rerun, then locks in a regression test. Routes fixes to active Crossings or linked repair packs without widening scope. Skip obvious one-line typos.
+description: Debug explicit Full Airlock work
 ---
 
 # Debug — reproduce before you fix
@@ -47,12 +46,4 @@ Do not widen scope. If any required path is outside the approved contract, stop 
 
 For an obvious standalone one-line typo with no active pack, keep handling lightweight; do not create a checkpoint store solely for it. Scope, evidence, artifact cleanup, and the concise return contract still apply.
 
-Use this exact five-bullet shape for every debug report:
-
-- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
-- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
-- **Evidence:** exact command/tool and result; name anything required but not run.
-- **Artifacts/cleanup:** retained evidence paths/references and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
-- **Action needed:** `none` or one exact decision, blocker, or next action.
-
-Return only those bullets, using facts and actions. Do not restate the prompt, plan, or file contract, and do not include long logs unless requested or a concise failure excerpt is needed.
+Lead with the diagnosis or verified fix. Include changed paths and actual evidence only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.

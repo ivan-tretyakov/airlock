@@ -1,6 +1,5 @@
 ---
-name: brainstorm
-description: Design-review and scope gate before substantial work. Locks an approved scope contract, candidate Delivery Packs, and verification intent before a spec, plan, production code, or file-writing subagent. Use for a feature, system, redesign, tool, or non-trivial change; skip only genuinely mechanical edits.
+description: Approve design and scope for Full Airlock work
 ---
 
 # Brainstorm — the design and scope gate

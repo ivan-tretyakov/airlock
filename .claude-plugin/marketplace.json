@@ -1,6 +1,6 @@
 {
   "name": "airlock-marketplace",
-  "description": "Lightweight, structured development workflows for Claude Code — approved scope, routed Delivery Packs, exact-candidate evidence, and a ledger that outlives the session.",
+  "description": "Opt-in adaptive development orchestration for Claude Code and Cowork.",
   "owner": {
     "name": "Ivan Tretyakov"
   },
@@ -8,8 +8,8 @@
     {
       "name": "airlock",
       "source": "./",
-      "description": "Lightweight structured dev flow: scope → Delivery Packs → evidence → review, plus debug.",
-      "version": "1.3.1"
+      "description": "Explicit activation, adaptive workflow weight, leaf-only delegation, and evidence where risk requires it.",
+      "version": "2.0.0"
     }
   ]
 }

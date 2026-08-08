@@ -2,9 +2,7 @@
 name: external-runner
 description: Superseded compatibility record for the retired Haiku relay; it performs no external dispatch.
 model: haiku
-effort: low
-maxTurns: 2
-background: false
+color: yellow
 tools: []
 ---
 
@@ -12,10 +10,4 @@ This is superseded compatibility documentation retained so stale references fail
 
 If invoked by an obsolete plan or caller, make no tool call. You must not invoke the launcher, OpenCode, Git, a validation command, another agent, cleanup, or any checkout operation. Do not inspect or forward a manifest and do not create a session, artifact, candidate, Crossing, retry, or resume. Return `blocked` and direct the caller to the canonical orchestrator's direct launcher route.
 
-Return exactly these five concise Airlock bullets and no other text when a stale caller invokes this compatibility record:
-
-- **Status:** `blocked`, followed by the fact that this compatibility route is superseded.
-- **Changes/findings:** `none`.
-- **Evidence:** no tool or process was invoked; canonical direct dispatch remains unrun.
-- **Artifacts/cleanup:** `none`.
-- **Action needed:** use the canonical orchestrator's approved direct launcher route.
+When invoked, return only: `Blocked: external-runner is superseded; use the canonical orchestrator direct-launcher route.`

@@ -32,10 +32,8 @@ A fresh, non-resumable runtime session ID is assigned at launch; it is never sup
 
 On a blocked, partial, interrupted, or timed-out run, stop or remove only exact attributable task-owned processes and temporary paths when ownership and safety are certain. Never clean unknown, pre-existing, user-owned, or another lane's state. Leave uncertain state untouched and report the exact blocker.
 
-Return exactly these five concise Airlock bullets and no other text:
+Return exactly these three machine-audited bullets and no other text:
 
-- **Status:** `done`, `partial`, or `blocked`, followed by one factual sentence.
-- **Changes/findings:** exact changed paths or prioritized findings; `none` when applicable.
-- **Evidence:** exact exploratory commands and results, selected/effective route, supplied policy identity and precedence-proof reference, and mandatory checks left for the launcher.
-- **Artifacts/cleanup:** fresh session ID when exposed, retained evidence, and exact temporary paths/processes removed, still present, or blocked; `none` when applicable.
-- **Action needed:** `none` or one exact decision, blocker, or next action.
+- **Status:** `done`, `partial`, or `blocked`, followed by the outcome and exact changed paths when any.
+- **Evidence:** exploratory checks, selected/effective route, policy identity/proof, exposed session ID, unresolved artifacts, and checks left for the launcher; omit facts that are unavailable.
+- **Action needed:** `none` or one exact blocker or next action.

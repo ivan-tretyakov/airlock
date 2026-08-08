@@ -35,9 +35,7 @@ export const GIT_INVOCATION_KINDS = Object.freeze([
 
 export const AIRLOCK_HEADINGS = Object.freeze([
   "Status",
-  "Changes/findings",
   "Evidence",
-  "Artifacts/cleanup",
   "Action needed",
 ]);
 
@@ -706,7 +704,8 @@ function validateWriterManifest(value, { manifestPath } = {}) {
   rejectSecretFields(value.opencode.permission);
   if (
     value.opencode.config.model !== value.route.model ||
-    value.opencode.config.default_agent !== value.route.agent
+    value.opencode.config.default_agent !== value.route.agent ||
+    value.opencode.config.subagent_depth !== 0
   ) {
     fail("manifest_opencode_invalid");
   }
@@ -1004,7 +1003,8 @@ function validateLegacyManifest(value, { manifestPath } = {}) {
   rejectSecretFields(value.opencode.permission);
   if (
     value.opencode.config.model !== value.route.model ||
-    value.opencode.config.default_agent !== value.route.agent
+    value.opencode.config.default_agent !== value.route.agent ||
+    value.opencode.config.subagent_depth !== 0
   ) {
     fail("manifest_opencode_invalid");
   }
