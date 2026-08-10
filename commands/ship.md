@@ -4,7 +4,7 @@ description: Ship an explicit Full Airlock Crossing
 
 # Ship — seal one Crossing with evidence
 
-Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable commit; a **Delivery Pack** is a coherent outcome made from one or more contiguous Crossings. Under an approved external writer handoff, the launcher-sealed candidate precursor contains the exact product paths and is not a Crossing; the following separate orchestrator Crossing contains process artifacts and references that candidate SHA/tree.
+Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable commit; a **Delivery Pack** is a coherent outcome made from one or more contiguous Crossings. Under an approved external writer handoff, the launcher-sealed candidate precursor contains the exact product paths and is not a Crossing; the following separate orchestrator Crossing contains process artifacts and references that candidate SHA/tree. The Airlock base rules (Output, Delegation, Artifacts and cleanup) from `/airlock:start` or the orchestrator agent apply throughout.
 
 ## 1. Load the planned boundary
 
@@ -33,29 +33,16 @@ This is code freeze. Any later substantive candidate-bearing change creates a ne
 
 ### 2A. Audit a launcher-sealed external candidate
 
-Use this handoff only when the approved route records worker commit permission `none` and launcher sealing permission for one exact candidate with pinned Crossing ID, message bytes/hash, and candidate path set. The worker owns scoped investigation and edits only. The launcher owns mandatory deterministic validations, exact staging, commit creation, post-commit proof, and runtime cleanup. Neither may edit a design, plan, ledger, checkpoint, or other orchestrator process artifact, and neither may push or publish.
+Use this handoff only when the approved route records worker commit permission `none` and launcher sealing permission for one exact candidate with pinned Crossing ID, message bytes/hash, and candidate path set. The worker owns scoped investigation and edits only; the launcher owns deterministic validations, exact staging, commit creation, post-commit proof, and runtime cleanup. Neither may edit an orchestrator process artifact, push, or publish.
 
-Consume one bounded launcher summary from the serialized foreground run. A valid `done` summary is still not acceptance: independently audit its launcher-sealed candidate precursor before any orchestrator edit, stage, or commit. A blocked summary with `no-commit`, staged, post-commit, unknown-process, or cleanup-failure state remains blocked exactly as reported; do not repair it during shipping.
+The full contract — summary consumption, recovery classification, and the independent candidate audit checklist — is `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md`; read it before auditing and apply it exactly. The load-bearing rules:
 
-For a `no-summary`, malformed-summary, timed-out, killed, or otherwise disrupted return, first prove the exact launcher process tree is quiescent. If process ownership or quiescence is uncertain, classify the state `indeterminate`, leave the checkout and artifacts untouched, and stop. Once quiescent, compare only with the recorded strict baseline:
+- A valid `done` summary is still not acceptance: independently audit the launcher-sealed candidate precursor against the recorded baseline before any orchestrator edit, stage, or commit. Any mismatch stops the candidate for a user decision.
+- A blocked summary remains blocked exactly as reported; do not repair it during shipping.
+- For a `no-summary`, malformed, timed-out, killed, or disrupted return, first prove the launcher process tree quiescent, then classify exactly one recovery state against the baseline: `no-commit` (no candidate; do not stage or commit the worker's edits), `one-commit` (proceed only to the independent audit), or `indeterminate` (stop without cleanup or mutation).
+- Never rewrite candidate history. A cleanup failure after commit leaves the commit intact and blocks acceptance until exact cleanup is independently resolved; it is not permission to replace the commit.
 
-- classify `no-commit` when `HEAD` is unchanged, the index is unchanged/empty, every baseline-dirty hash is preserved, and all new delta is confined to exact owned paths; no candidate exists and the orchestrator must not stage or commit those edits;
-- classify `one-commit` only when current `HEAD` is exactly one child of the baseline, its exact message bytes/hash and changed paths match the manifest, the index is empty, and structured status plus baseline-dirty hashes match; continue only to the independent audit below; or
-- classify every other state `indeterminate` and stop without cleanup or mutation.
-
-Never rewrite candidate history. Do not reset, checkout, switch, rebase, amend, revert, clean, unstage, recommit, or otherwise alter a candidate or recovery state. A cleanup failure after commit leaves the commit intact and blocks acceptance until exact cleanup is independently resolved under an approved action; it is not permission to replace the commit.
-
-For a valid completed summary or a recovered `one-commit` state, audit and record:
-
-1. the fresh session ID and completion/classification; approved role/branch and selected runtime/agent/model/variant; effective runtime/agent/model/variant; full permission/containment policy identity and effective-policy proof; and exact manifest path/hash;
-2. the approved current branch, pre-dispatch full `HEAD` as sole parent, current candidate `HEAD`, exactly one child commit, and full launcher candidate SHA/tree;
-3. the exact commit message bytes/hash and complete no-renames changed-name set, all and only within the product file contract and containing no process artifact;
-4. an empty index, complete structured porcelain-v2 status exactly equal to the recorded baseline, owned-path hashes, and every unrelated baseline status entry and dirty-path hash preserved;
-5. each ordered mandatory validation's direct executable, exact argv, working directory, timeout/output bounds, expected/actual exit, and proof that validation introduced no delta;
-6. direct Git executable identity; custom-filter rejection; verified empty hooks path; signing disabled; exact staging/cached-name audit; cached `diff --check`; parent/count/message/tree/path/post-state proof; and launcher's recovery classification; and
-7. exact retained/temporary classification and verified cleanup state for the session, process tree, manifest, evidence, commit-message file, hooks directory, temporary directory, and any other declared artifact.
-
-Any mismatch stops the candidate for a user decision. A passing audit freezes the launcher-sealed candidate precursor; subsequent gates exercise that exact SHA/tree, while process-only ledger work does not stale it. The orchestrator then owns the separate orchestrator Crossing. This audit proves local-checkout state only; external side effects remain guardrail and self-report territory.
+A passing audit freezes the launcher-sealed candidate precursor; subsequent gates exercise that exact SHA/tree, while process-only ledger work does not stale it. The orchestrator then owns the separate orchestrator Crossing. The audit proves local-checkout state only; external side effects remain guardrail and self-report territory.
 
 ## 3. Use fresh evidence, without duplicate runs
 
@@ -74,18 +61,11 @@ Every gate has three independent dimensions:
 - **Gate state:** `pending`, `running`, `passed`, `failed`, `blocked`, or `stale`.
 - **Waiver:** approver, reason, and date. A waiver does not change applicability or turn a gate state into `passed`.
 
-Each evidence record identifies: gate ID, exact candidate, timestamp, executor host role and effective runtime/agent/model/variant, command or MCP tool, environment/target, result, and artifact reference. External evidence also records the selected/effective route, full permission/containment policy identity and proof, deterministic-validation/Git-sealing evidence, recovery classification, and exact cleanup. A substantive code, test, configuration, generated-artifact, or cited-spec change stales every affected gate; a ledger-only bookkeeping edit does not. For the normal staged path, the resulting commit/tree becomes the candidate identity; for an external handoff, the launcher-sealed precursor SHA/tree remains the candidate and the orchestrator Crossing commit is recorded separately. Retain any pre-commit base/diff hash that gates actually exercised.
+Each evidence record identifies: gate ID, exact candidate, timestamp, executor host role and effective runtime/agent/model/variant, command or MCP tool, environment/target, result, and artifact reference. External evidence also records the additional fields required by `references/EXTERNAL-RUNTIME.md`. A substantive code, test, configuration, generated-artifact, or cited-spec change stales every affected gate; a ledger-only bookkeeping edit does not. For the normal staged path, the resulting commit/tree becomes the candidate identity; for an external handoff, the launcher-sealed precursor SHA/tree remains the candidate and the orchestrator Crossing commit is recorded separately. Retain any pre-commit base/diff hash that gates actually exercised.
 
-If a required gate fails after launcher sealing, or a candidate-bearing change makes its evidence stale, mark the gate/evidence and pack's current candidate `failed` or `stale`, and record it under checkpoint **Fresh evidence** and **Blockers / decisions**; do not add a Crossing entry or create the orchestrator Crossing commit. With explicit approval, a fresh manifest/launcher run starts from current `HEAD`, passes the full pre-dispatch checks, and may seal exactly one successor candidate; that SHA/tree becomes the current candidate. The other permitted recovery is an explicit user-approved revert commit. Preserve prior candidates and evidence; never silently reset, rebase, amend, or revert them.
+If a required gate fails after launcher sealing, or a candidate-bearing change makes its evidence stale, mark the gate/evidence and pack's current candidate `failed` or `stale`, and record it under checkpoint **Fresh evidence** and **Blockers / decisions**; do not add a Crossing entry or create the orchestrator Crossing commit. With explicit approval, a fresh manifest/launcher run starts from current `HEAD` and may seal exactly one successor candidate, or the user may approve an explicit revert commit. Preserve prior candidates and evidence; never silently reset, rebase, amend, or revert them.
 
-Classify every non-product artifact and every temporary process created during implementation, verification, or shipping:
-
-- **Retained evidence:** move file-based evidence to the project-configured evidence home under a stable exact path and reference it from the applicable Crossing or gate evidence row.
-- **Temporary:** record the exact task-owned path/process, then remove or stop it before return when ownership is certain and cleanup is safe.
-
-Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another lane's artifacts. If ownership or safe cleanup is uncertain, leave the item in place, block cleanup, and report the exact item and decision needed. For Playwright/browser work, retain only required evidence and remove superseded task-created screenshots, downloads, traces, and logs. Never clean credentials, browser profiles, cookies, localStorage, or other user state.
-
-If any temporary artifact or process was created, cleanup is a required gate even when cleanup has already occurred. Add it through an approved plan/ledger amendment if absent. Its fresh evidence must identify the exact paths/processes and prove each was removed or stopped; do not treat an unverified absence as a pass. Pack acceptance is blocked until this evidence is fresh and passed.
+Classify every non-product artifact and temporary process created during implementation, verification, or shipping per the base Artifacts-and-cleanup rules. If any temporary artifact or process was created, cleanup is a required gate even when cleanup has already occurred. Add it through an approved plan/ledger amendment if absent. Its fresh evidence must identify the exact paths/processes and prove each was removed or stopped; do not treat an unverified absence as a pass. Pack acceptance is blocked until this evidence is fresh and passed.
 
 The pre-ship independent-review gate, when required, is acceptance evidence. It is distinct from post-ship Airlock **`review`**.
 
@@ -113,7 +93,7 @@ Use the exact ledger path from the plan; initialize it from `${CLAUDE_PLUGIN_ROO
 - **Candidate:** `<launcher-sealed precursor SHA/tree, existing commit/tree, or base SHA + staged product-diff hash>`
 - **Owned:** `<this Crossing’s paths>`
 - **Touched:** `<final Crossing git diff --cached --name-status; process artifacts only for an external handoff>`
-- **Launcher handoff audit:** `n/a` or `<session/completion; manifest hash; approved branch/baseline; parent/count; launcher candidate SHA/tree; message bytes/hash; changed names; index/structured status/hashes; selected/effective route; policy identity/proof; deterministic validation proof; Git sealing/audit proof; recovery classification; exact artifacts/cleanup>`
+- **Launcher handoff audit:** `n/a` or `<the audited summary facts required by references/EXTERNAL-RUNTIME.md>`
 - **Evidence:** `<focused/current Crossing checks and result>`
 - **Artifacts / cleanup:** `<retained evidence references; temporary paths/processes and cleanup evidence; or none>`
 - **Scope audit:** passed against `<plan Crossing/file contract>`
@@ -135,7 +115,7 @@ Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recomp
 - Verify with `git show --stat --oneline HEAD`.
 - Do not call an active pack accepted.
 
-Lead with the shipped outcome. Include Crossing/pack IDs, SHA or candidate identity, gate states/waivers, deviations, skipped checks, and cleanup only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
+Lead with the shipped outcome. Include Crossing/pack IDs, SHA or candidate identity, gate states/waivers, deviations, skipped checks, and cleanup only when present; the base-rules return contract applies.
 
 ## Legacy 1.1 compatibility
 

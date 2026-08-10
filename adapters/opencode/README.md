@@ -23,7 +23,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs" \
   --manifest <absolute-manifest.json> --sha256 <lowercase-hex>
 ```
 
-The orchestrator creates the secret-free manifest, hashes its exact bytes, and records it as task-owned temporary state. The launcher validates the hash and emits one bounded JSON summary with schema `airlock.external-agent-result/v1`, including status/classification/action, selected/effective route, session, process, event evidence, policy, validation, candidate, recovery, and cleanup facts. `agents/external-runner.md` is superseded compatibility documentation; it makes no tool call or dispatch.
+The orchestrator creates the secret-free manifest, hashes its exact bytes, and records it as task-owned temporary state. The launcher validates the hash and emits one bounded JSON summary with schema `airlock.external-agent-result/v1`, including status/classification/action, selected/effective route, session, process, event evidence, policy, validation, candidate, recovery, and cleanup facts.
 
 The writer manifest schema is `airlock.external-agent/v2` and strictly pins the route, structured baseline, exact owned paths, ordered validations, launcher commit contract, artifacts, expected mutation, cleanup, retention, and policy fields. Unknown fields, secrets, non-lowercase SHA-256 values, shell command strings, checkout escapes, and omitted required fields fail closed. Every mandatory validation supplies a direct executable, argv array, checkout-contained working directory, timeout, output bounds, and expected exit; the launcher invokes it with `shell: false` and rejects any validation-created delta.
 

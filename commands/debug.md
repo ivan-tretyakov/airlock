@@ -1,10 +1,10 @@
 ---
-description: Debug explicit Full Airlock work
+description: Reproduce and isolate non-trivial failures in Airlock work
 ---
 
 # Debug — reproduce before you fix
 
-Guessing wastes runs and can hide stale gate evidence. Move by evidence.
+Guessing wastes runs and can hide stale gate evidence. Move by evidence. The **Evidence loop** below applies to any Airlock debugging, including Compact work with no pack or ledger; the pack, gate, and ledger bookkeeping in the other sections applies only when the failure belongs to Full work. The Airlock base rules (Output, Delegation, Artifacts and cleanup) from `/airlock:start` or the orchestrator agent apply throughout.
 
 ## Establish pack and gate context
 
@@ -32,7 +32,7 @@ The ledger is the only durable resume store. When it is owned, replace its singl
 
 For stochastic, timing-sensitive, or tuning behavior, use the planned N-run/fixed-seed distribution, never one run.
 
-Classify every non-product probe, capture, log, download, trace, and temporary/background process created during diagnosis. Move retained file evidence to the project-configured evidence home under a stable exact path and reference it; remove or stop only exact task-owned temporary paths/processes before return when safe. Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another lane's artifacts. If ownership or cleanup is unsafe, leave it in place and block/report the exact item. For Playwright/browser work, retain only required evidence and remove superseded task-created screenshots, downloads, traces, and logs; never clean credentials, browser profiles, cookies, localStorage, or other user state.
+Classify every non-product probe, capture, log, download, trace, and temporary/background process created during diagnosis per the base Artifacts-and-cleanup rules.
 
 ## Route and reverify
 
@@ -44,6 +44,6 @@ After a substantive fix, update the Debug row’s **Gates to rerun** list and ma
 
 Do not widen scope. If any required path is outside the approved contract, stop and surface it. Invoke **`ship`** for the resulting Crossing; it owns final gate freshness and pack acceptance.
 
-For an obvious standalone one-line typo with no active pack, keep handling lightweight; do not create a checkpoint store solely for it. Scope, evidence, artifact cleanup, and the concise return contract still apply.
+For an obvious standalone one-line typo with no active pack, keep handling lightweight; do not create a checkpoint store solely for it. Scope, evidence, artifact cleanup, and the base-rules return contract still apply.
 
-Lead with the diagnosis or verified fix. Include changed paths and actual evidence only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
+Lead with the diagnosis or verified fix; the base-rules return contract applies.

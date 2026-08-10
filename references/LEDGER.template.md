@@ -47,17 +47,32 @@ The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-
 
 <!-- Applicability: required | not-required -->
 <!-- Gate state for required gates: pending | running | passed | failed | blocked | stale -->
-<!-- A waiver is separate from applicability and gate state. -->
+<!-- A waiver is separate from applicability and gate state; write it as approver / reason / date, or —. -->
 
-| Gate ID | Pack ID | Gate | Applicability | Gate state | Waiver approver | Waiver reason | Waiver date | Current evidence |
-|---|---|---|---|---|---|---|---|---|
-| `<gate-id>` | `<pack-id>` | `<technical/review/browser/visual/live/cleanup>` | required | pending | — | — | — | — |
+| Gate ID | Pack ID | Gate | Applicability | Gate state | Waiver (approver / reason / date) | Current evidence |
+|---|---|---|---|---|---|---|
+| `<gate-id>` | `<pack-id>` | `<technical/review/browser/visual/live/cleanup>` | required | pending | — | — |
 
 ## Gate evidence
 
-| Evidence ID | Gate ID | Launcher candidate SHA / tree | Timestamp | Executor role | Effective runtime / agent / model / variant | Selected / effective route | Policy identity / proof | Deterministic validation proof | Git sealing / audit proof | Recovery classification | Command / MCP tool | Environment / target | Result | Artifact reference | Exact cleanup |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `<evidence-id>` | `<gate-id>` | `<launcher candidate SHA/tree, existing commit/tree, or base SHA + staged product-diff hash>` | `<ISO-8601>` | verifier | `<actual>` | `<n/a or approved/effective runtime, agent, model, variant, checkout, branch>` | `<n/a or complete policy identity/hash + precedence proof>` | `<n/a or ordered direct executable/argv/cwd/timeout/output/exit + no-delta result>` | `<n/a or direct Git/filter/hooks/staging/diff-check/commit/post-state + independent audit result>` | `<not-needed, no-commit, one-commit, cleanup-failed-after-commit, indeterminate, or exact launcher value>` | `<exact invocation>` | `<where/what>` | passed/failed/blocked/stale | `<stable path/URL/ledger reference>` | `<exact session/process/path states and verified absence, or none>` |
+One record block per evidence entry; omit the External handoff sub-list entirely for native runs.
+
+### Evidence `<evidence-id>` — gate `<gate-id>` — `<ISO-8601>`
+
+- **Candidate:** `<launcher candidate SHA/tree, existing commit/tree, or base SHA + staged product-diff hash>`
+- **Executor:** `<role>` — effective `<runtime / agent / model / variant>`
+- **Command / MCP tool:** `<exact invocation>`
+- **Environment / target:** `<where/what>`
+- **Result:** passed | failed | blocked | stale
+- **Artifact reference:** `<stable path/URL/ledger reference>`
+- **External handoff (external runs only):**
+  - **Launcher candidate SHA / tree:** `<full SHA / full tree>`
+  - **Selected / effective route:** `<approved and observed runtime, agent, model, variant, checkout, branch>`
+  - **Policy identity / proof:** `<complete policy identity/hash + precedence proof>`
+  - **Deterministic validation proof:** `<ordered direct executable/argv/cwd/timeout/output/exit + no-delta result>`
+  - **Git sealing / audit proof:** `<direct Git/filter/hooks/staging/diff-check/commit/post-state + independent audit result>`
+  - **Recovery classification:** `<not-needed, no-commit, one-commit, cleanup-failed-after-commit, indeterminate, or exact launcher value>`
+  - **Exact cleanup:** `<exact session/process/path states and verified absence, or none>`
 
 ## Crossings
 
@@ -66,15 +81,9 @@ The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-
 - **Delivery Pack:** `<pack-id>`
 - **Commit:** this commit (the orchestrator Crossing; locate with `git log -S '<crossing-id>' --oneline -- <this-ledger-path>`)
 - **Candidate:** `<launcher-sealed precursor SHA/tree, existing commit/tree, or base SHA + staged product-diff hash>`
-- **Launcher candidate SHA / tree:** `<full SHA / full tree, or n/a>`
 - **Owned:** `<paths from this Crossing’s file contract>`
 - **Touched:** `<final Crossing git diff --cached --name-status; process artifacts only for an external handoff>`
-- **Selected / effective route:** `<n/a or approved and observed runtime/agent/model/variant/checkout/branch>`
-- **Policy identity / proof:** `<n/a or immutable policy hash + precedence/effective-policy proof>`
-- **Deterministic validation proof:** `<n/a or ordered direct executable/argv/cwd/timeout/output/expected+actual exit/no-delta evidence>`
-- **Git sealing / audit proof:** `<n/a or baseline parent/count/message bytes+hash/tree/paths/index/status/hashes/filter/hooks/staging/diff-check/post-state evidence>`
-- **Recovery classification:** `<not-needed, no-summary/no-commit, no-summary/one-commit, cleanup-failed-after-commit, indeterminate, or exact launcher value>`
-- **Exact cleanup:** `<retained evidence plus exact session/process/manifest/evidence/message/hooks/temporary-path cleanup and absence proof; none if none>`
+- **External handoff (external runs only; omit for native):** `<Launcher candidate SHA / tree; Selected / effective route; Policy identity / proof; Deterministic validation proof; Git sealing / audit proof; Recovery classification; Exact cleanup — the audited summary facts required by references/EXTERNAL-RUNTIME.md>`
 - **Evidence:** `<focused and required Crossing checks>` → `<result>`
 - **Artifacts / cleanup:** `<retained evidence references; temporary paths/processes and cleanup evidence; or none>`
 - **Scope audit:** passed against `<plan Crossing/file contract>`

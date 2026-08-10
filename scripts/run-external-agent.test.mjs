@@ -693,7 +693,10 @@ function fakeWriterRuntime(
 
 const CANONICAL_SOURCE = Object.freeze({
   orchestrator: new URL("../agents/orchestrator.md", import.meta.url),
-  externalRunner: new URL("../agents/external-runner.md", import.meta.url),
+  externalRuntime: new URL(
+    "../references/EXTERNAL-RUNTIME.md",
+    import.meta.url,
+  ),
   worker: new URL(
     "../adapters/opencode/agents/airlock-worker.md",
     import.meta.url,
@@ -712,9 +715,9 @@ function occurrences(text, value) {
 }
 
 test(
-  "orchestrator directly invokes one strict launcher manifest and audits its sealed candidate",
+  "external-runtime reference holds the strict manifest and dispatch contract once",
   async () => {
-    const source = await readCanonicalSource(CANONICAL_SOURCE.orchestrator);
+    const source = await readCanonicalSource(CANONICAL_SOURCE.externalRuntime);
     const launcherPath =
       "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs";
 
@@ -731,37 +734,40 @@ test(
     ]) {
       assert.ok(
         source.includes(required),
-        `missing orchestrator contract: ${required}`,
+        `missing external-runtime contract: ${required}`,
       );
     }
     assert.equal(occurrences(source, launcherPath), 1);
     assert.match(source, /invoke it directly, exactly once, in the foreground/i);
-    assert.match(source, /remain idle in the target checkout/i);
+    assert.match(source, /orchestrator remains idle in that checkout/i);
     assert.match(source, /independently audit the launcher-sealed candidate/i);
-    assert.match(
-      source,
-      /Never use `Agent` or `external-runner` for active dispatch/,
-    );
     assert.match(
       source,
       /Do not construct an OpenCode command, a launcher-internal Git command, or a deterministic validation command outside the manifest/,
     );
-    assert.doesNotMatch(
-      source,
-      /delegate[^\n]+to `external-runner` as a foreground subagent/i,
-    );
   },
 );
 
-test("external-runner is an unambiguous superseded compatibility record", async () => {
-  const source = await readCanonicalSource(CANONICAL_SOURCE.externalRunner);
+test(
+  "orchestrator binds to the external-runtime reference and its invariants",
+  async () => {
+    const source = await readCanonicalSource(CANONICAL_SOURCE.orchestrator);
 
-  assert.match(source, /superseded compatibility/i);
-  assert.match(source, /not an active or mandatory dispatch route/i);
-  assert.match(source, /must not invoke the launcher/i);
-  assert.doesNotMatch(source, /run-external-agent\.mjs/);
-  assert.doesNotMatch(source, /first and only tool call/i);
-});
+    assert.match(
+      source,
+      /references\/EXTERNAL-RUNTIME\.md/,
+      "orchestrator must point at the canonical external-runtime reference",
+    );
+    assert.match(source, /exactly once, in the foreground/i);
+    assert.match(source, /independently audit the launcher-sealed candidate/i);
+    assert.match(source, /worker commit permission is `none`/i);
+    assert.match(source, /never rewrite candidate history/i);
+    assert.match(
+      source,
+      /Never dispatch through `Agent` or any relay agent/,
+    );
+  },
+);
 
 test(
   "OpenCode worker owns edits and exploratory evidence without Git sealing claims",
@@ -802,10 +808,8 @@ test("canonical plan, ship, and ledger use launcher-sealed candidate semantics",
 
   for (const required of [
     "launcher-sealed candidate precursor",
-    "baseline{branch,head,indexEmpty,status,ownedPathHashes,dirtyPathHashes}",
-    "validations[{purpose,executable,args,workingDirectory,timeoutMs,maxStdoutBytes,maxStderrBytes,expectedExitCode}]",
-    "commit{allowed,crossingId,message,messageSha256,candidatePaths}",
-    "artifacts{manifestPath,temporaryDirectory,evidencePath,messagePath,hooksDirectory}",
+    "references/EXTERNAL-RUNTIME.md",
+    "airlock.external-agent/v2",
     "worker commit permission `none`",
     "launcher sealing permission",
     "${CLAUDE_PLUGIN_ROOT}/scripts/run-external-agent.mjs",

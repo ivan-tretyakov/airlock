@@ -44,7 +44,12 @@ test("Airlock exposes explicit commands and no auto-discovered workflow skills",
   }
 
   const skillsRoot = path.join(root, "skills");
-  const skillEntries = await readdir(skillsRoot, { recursive: true });
+  let skillEntries = [];
+  try {
+    skillEntries = await readdir(skillsRoot, { recursive: true });
+  } catch (error) {
+    assert.equal(error.code, "ENOENT", "skills directory must be absent or readable");
+  }
   assert.equal(
     skillEntries.some((entry) => path.basename(entry).toUpperCase() === "SKILL.MD"),
     false,
@@ -66,12 +71,71 @@ test("activation is session-only and runtime configuration cannot activate Airlo
   assert.match(setup, /Airlock remains off until \/airlock:start/);
 });
 
-test("adaptive routing keeps Quick work to one leaf and no process artifacts", async () => {
+test("adaptive routing keeps Quick work to one execution and no process artifacts", async () => {
   const start = await source("commands/start.md");
-  assert.match(start, /Exactly one leaf worker implements and validates end-to-end/i);
+  assert.match(start, /One execution end-to-end/i);
   assert.match(start, /No design, plan, ledger, Crossing, or independent review/i);
   assert.match(start, /Security, credentials, destructive actions, migrations/i);
   assert.match(start, /dispatch exactly one of `code-light` or `code-standard`/i);
+  assert.match(start, /may not delegate again/i);
+});
+
+test("start.md carries the canonical base rules other commands reference", async () => {
+  const start = await source("commands/start.md");
+  assert.match(start, /Airlock base rules/);
+  assert.match(start, /## Artifacts and cleanup/);
+  assert.match(start, /MUST_FIX, SHOULD_FIX, PARK, or OUT_OF_SCOPE/);
+  assert.match(start, /Never broad-glob cleanup/i);
+  assert.match(start, /at most five bullets/i);
+  for (const command of ["plan.md", "ship.md", "review.md", "debug.md"]) {
+    const text = await source(path.join("commands", command));
+    assert.match(text, /base rules|base-rules/i, `${command} must reference the base rules`);
+  }
+});
+
+test("external machinery lives in the canonical reference, loaded on demand", async () => {
+  const reference = await source("references/EXTERNAL-RUNTIME.md");
+  assert.match(reference, /airlock\.external-agent\/v2/);
+  const manifestFields = "commit{allowed,crossingId,message,messageSha256,candidatePaths}";
+  assert.ok(reference.includes(manifestFields));
+  for (const file of [
+    "commands/start.md",
+    "commands/plan.md",
+    "commands/ship.md",
+    "agents/orchestrator.md",
+  ]) {
+    const text = await source(file);
+    assert.match(
+      text,
+      /references\/EXTERNAL-RUNTIME\.md/,
+      `${file} must point at the external-runtime reference`,
+    );
+    assert.equal(
+      text.includes(manifestFields),
+      false,
+      `${file} must not duplicate the manifest schema`,
+    );
+  }
+});
+
+test("guard hook is registered, gated on the dispatch contract, and fail-open", async () => {
+  const hooks = JSON.parse(await source("hooks/hooks.json"));
+  const preToolUse = hooks.hooks.PreToolUse;
+  assert.ok(Array.isArray(preToolUse) && preToolUse.length >= 2);
+  for (const entry of preToolUse) {
+    assert.match(entry.hooks[0].command, /guard\.mjs/);
+  }
+  const guard = await source("hooks/guard.mjs");
+  assert.match(guard, /airlock\.contract\/v1/);
+  assert.match(guard, /Fail-open by design/i);
+  const retiredAgent = path.join(agentsDirectory, "external-runner.md");
+  let retiredExists = true;
+  try {
+    await readFile(retiredAgent, "utf8");
+  } catch (error) {
+    retiredExists = error.code !== "ENOENT";
+  }
+  assert.equal(retiredExists, false, "external-runner tombstone must stay deleted");
 });
 
 test("native workers are non-Fable leaves without delegation tools", async () => {
@@ -124,7 +188,7 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.0.0");
+  assert.equal(plugin.version, "2.1.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);

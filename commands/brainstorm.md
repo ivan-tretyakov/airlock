@@ -4,7 +4,7 @@ description: Approve design and scope for Full Airlock work
 
 # Brainstorm — the design and scope gate
 
-Make the design decision *before* work is committed, so the agent does not build the wrong thing well.
+Make the design decision *before* work is committed, so the agent does not build the wrong thing well. The Airlock base rules from `/airlock:start` or the orchestrator agent apply throughout.
 
 ## Hard-ish gate
 

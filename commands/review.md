@@ -4,7 +4,7 @@ description: Review explicit Full Airlock work
 
 # Review — the far door
 
-Make post-ship feedback an artifact, not a conversation. This workflow is **not** the pre-ship independent-review gate: that gate helps accept a candidate; Airlock `review` handles feedback after a Crossing has shipped.
+The Airlock base rules (Output, Delegation, Artifacts and cleanup) from `/airlock:start` or the orchestrator agent apply throughout. Make post-ship feedback an artifact, not a conversation. This workflow is **not** the pre-ship independent-review gate: that gate helps accept a candidate; Airlock `review` handles feedback after a Crossing has shipped.
 
 ## 1. Load pack-aware state
 
@@ -57,7 +57,7 @@ Never append product changes to an accepted Delivery Pack or rewrite its accepte
 
 A repair pack follows the normal rules: coherent outcome, one or more contiguous Crossings, file contract, portable work class/host role, per-pack routing approval, and risk-selected gates. A one-change repair can be a compact Light, single-Crossing pack. If review only records dispositions, use a compact ledger-only review pack rather than adding product Crossings to accepted history.
 
-Classify non-product artifacts created during review as retained evidence or temporary. Move retained file evidence to the configured evidence home and reference it; remove or stop only exact task-owned temporary paths/processes when safe. Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another lane's artifacts. Block and report unsafe cleanup. For Playwright/browser work, remove superseded task-created screenshots, downloads, traces, and logs while retaining only required evidence; never clean credentials, browser profiles, cookies, localStorage, or other user state.
+Classify non-product artifacts created during review per the base Artifacts-and-cleanup rules.
 
 For a shipped Crossing in an `active` pack, use a remaining planned Crossing only when the approved scope and outcome already cover the fix; otherwise add an approved repair/amendment. Invoke **`brainstorm`** when feedback changes design. For an omitted path without a design change, propose the exact scope amendment and get approval before editing.
 
@@ -70,7 +70,7 @@ Resolve MUST_FIX before SHOULD_FIX. Make the smallest change, keep a regression 
 - Reply to and resolve remote threads when authenticated tooling supports it; otherwise report the unresolved remote action.
 - Ensure `ship` closes the Resume checkpoint at repair-pack acceptance and references its final Crossing; otherwise leave one exact next action for unfinished review.
 
-Lead with findings, ordered by severity. Include resolved, rejected, parked, repair-pack links, failed/stale gates, waivers, and uncollected sources only when present. If blocked, state the cause and one next action. Use at most five bullets; omit empty sections, preambles, recaps, tangents, and closers. Include long logs only when needed to explain failure.
+Lead with findings, ordered by severity. Include resolved, rejected, parked, repair-pack links, failed/stale gates, waivers, and uncollected sources only when present; the base-rules return contract applies.
 
 ## Stop conditions
 
