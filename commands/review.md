@@ -82,3 +82,5 @@ Lead with findings, ordered by severity. Include resolved, rejected, parked, rep
 - An item is about to be marked done without evidence and a checkable commit reference.
 
 Next skill: **`ship`**.
+
+Use `AskUserQuestion` for this triage checkpoint; do not make the structured decision optional.

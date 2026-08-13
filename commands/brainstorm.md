@@ -48,3 +48,7 @@ For a one-file tool, script, or contained utility, present a short scope contrac
 Capture the *why*, not only the decision. Specify outcomes and constraints; leave implementation detail and final pack routing/gates to `plan`.
 
 Next skill: **`plan`**.
+
+## Approval message
+
+For design approval, use `AskUserQuestion` and give a recommendation in no more than three sentences. Link the written specification instead of streaming its detail; the base interaction contract governs the rest of the user-facing message.

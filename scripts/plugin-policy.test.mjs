@@ -266,3 +266,24 @@ test("release metadata agrees and credits the concise-output inspiration", async
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
 });
+
+test("Airlock user messages follow one explicit interaction contract", async () => {
+  const start = await source("commands/start.md");
+  assert.match(start, /exactly one of three forms/i);
+  assert.match(start, /PROGRESS.*one line/is);
+  assert.match(start, /DECISION.*AskUserQuestion/is);
+  assert.match(start, /BLOCKED.*at most three lines/is);
+  assert.match(start, /Item \| State \| Next \| Owner/);
+  assert.match(start, /about fifteen lines/i);
+  assert.match(start, /internal.*audit reasoning.*never shown/is);
+  assert.match(start, /plain language/i);
+});
+
+test("design and plan approvals link detail instead of streaming it", async () => {
+  for (const file of ["commands/brainstorm.md", "commands/plan.md"]) {
+    const text = await source(file);
+    assert.match(text, /no more than three sentences/i);
+    assert.match(text, /link.*(?:specification|plan)/i);
+    assert.match(text, /AskUserQuestion/);
+  }
+});

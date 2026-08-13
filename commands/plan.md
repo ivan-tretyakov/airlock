@@ -172,3 +172,5 @@ Activate one approved Delivery Pack and work its contiguous Crossings in order. 
 Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery Pack only when all unwaived required gates have fresh evidence for its exact candidate. Feedback after a shipped commit goes through **`review`**.
 
 If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence or checkpoint history.
+
+For each approval, use `AskUserQuestion` with a recommendation in no more than three sentences. Link the written plan instead of streaming its detail; the base interaction contract governs the rest of the user-facing message.

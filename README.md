@@ -145,3 +145,17 @@ claude plugin validate .claude-plugin/marketplace.json --strict
 ## License
 
 Apache-2.0. See `LICENSE`.
+
+## Plain-language workflow
+
+User messages use plain language while artifacts retain canonical terms for grep-ability.
+
+| User message | Artifact term |
+|---|---|
+| work package | Delivery Pack |
+| checkpoint commit | Crossing |
+| check | gate |
+| exact code being verified | candidate |
+| approved skip | waiver |
+| parallel workstream | lane |
+| test-fix-simplify | RED-GREEN-refactor |
