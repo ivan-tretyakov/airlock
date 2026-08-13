@@ -128,6 +128,7 @@ test("browser leaves are read-only, capability-aware, and token-safe", async () 
   assert.match(metadata, /ToolSearch/);
   assert.match(metadata, /mcp__chrome-devtools__/);
   assert.doesNotMatch(metadata, /\b(?:Edit|Write|NotebookEdit|Agent)\b/);
+  assert.match(browser, /if the required browser backend is unavailable, STOP and report the exact capability gap/i);
   for (const text of [browser, visual]) {
     assert.match(text, /never read .*console.*network.*wholesale/i);
     assert.match(text, /filtered output/i);
