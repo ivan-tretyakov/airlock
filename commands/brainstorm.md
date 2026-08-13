@@ -42,8 +42,8 @@ For a one-file tool, script, or contained utility, present a short scope contrac
 1. **Understand the request.** Read relevant code, project instructions (`CLAUDE.md`, `AGENTS.md`, or configured equivalent), and project notes. State what you found.
 2. **Ask only design-changing questions, batched.** Use the host’s structured question tool when available, 2–4 questions max, with a recommended option and your position.
 3. **Float 2–3 approaches.** Give each tradeoff and rough weight, then recommend one and explain why.
-4. **Present the design:** goal, scope/non-goals, scope contract, key decisions, candidate Delivery Packs, verification intent, and risks. For a contentious or expensive decision, seek an independent reviewer in a separate context, preferably from a different model family when available.
-5. **On approval**, write the self-contained design to the project’s specs directory (default `docs/specs/YYYY-MM-DD-<topic>-design.md`) and invoke **`plan`**. Do not implement directly from the design.
+4. **Write the proposed/unapproved specification before approval.** Save it to the project’s specs directory (default `docs/specs/YYYY-MM-DD-<topic>-design.md`) so the approval link exists. Present the design, its work-package table, verification intent, and risks; label the file proposed/unapproved.
+5. **Ask for approval.** Use `AskUserQuestion` with concrete options and a recommendation in no more than three sentences of rationale, linking the proposed/unapproved specification and work-package table. On approval, finalize the specification and invoke **`plan`**. Do not implement directly from the design.
 
 Capture the *why*, not only the decision. Specify outcomes and constraints; leave implementation detail and final pack routing/gates to `plan`.
 
@@ -51,4 +51,4 @@ Next skill: **`plan`**.
 
 ## Approval message
 
-For design approval, use `AskUserQuestion` and give a recommendation in no more than three sentences. Link the written specification instead of streaming its detail; the base interaction contract governs the rest of the user-facing message.
+For design approval, use `AskUserQuestion` with concrete options and a recommendation in no more than three sentences of rationale. Link the existing proposed/unapproved specification and its work-package table instead of streaming detail; finalize it only after approval.

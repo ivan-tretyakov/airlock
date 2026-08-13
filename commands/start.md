@@ -80,9 +80,9 @@ If `$ARGUMENTS` contains a task, classify and execute it now. If it contains onl
 ### Interaction contract
 
 - Every user-facing message is exactly one of three forms: **PROGRESS**, **DECISION**, or **BLOCKED**. Lead with the result, decision, or next action.
-- **PROGRESS:** one line stating the meaningful state change and next action. Use status only at work package or Crossing boundaries.
-- **DECISION:** use `AskUserQuestion` for every approval or design-changing choice; give a recommendation and no more than three concise sentences that link the relevant specification or plan instead of streaming it.
+- **PROGRESS:** one line stating the meaningful state change and next action. Use status only at work-package or review-round boundaries.
+- **DECISION:** use `AskUserQuestion` for every approval or design-changing choice; present concrete options and a recommendation in no more than three concise sentences that link the relevant specification or plan instead of streaming it.
 - **BLOCKED:** at most three lines: cause, impact, and one exact next action or decision needed.
-- At a work-package or Crossing boundary, use this compact status table when it clarifies handoff: `Item | State | Next | Owner`. Keep the whole message to about fifteen lines.
-- Keep internal audit reasoning, deliberation, and logs never shown unless needed to explain a failure. Include only changed paths and actual evidence when useful; omit empty sections.
+- At a work-package or review-round boundary, use this compact status table when it clarifies handoff: `Item | State | Next | Owner`. Keep the whole message to about fifteen lines.
+- Keep internal audit reasoning, deliberation, and logs never shown. State only the actionable blocked cause; include changed paths and actual evidence when useful; omit empty sections.
 - Use plain language in user messages: work package (Delivery Pack), checkpoint commit (Crossing), check (gate), exact code being verified (candidate), approved skip (waiver), parallel workstream (lane), and test-fix-simplify (RED-GREEN-refactor). Artifacts retain canonical terms for grep-ability.

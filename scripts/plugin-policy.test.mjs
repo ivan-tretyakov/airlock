@@ -287,3 +287,35 @@ test("design and plan approvals link detail instead of streaming it", async () =
     assert.match(text, /AskUserQuestion/);
   }
 });
+
+test("interaction contract requires concrete decisions and review-round boundaries", async () => {
+  const [start, orchestrator] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+  ]);
+  for (const text of [start, orchestrator]) {
+    assert.match(text, /DECISION.*concrete options.*recommendation/is);
+    assert.match(text, /work-?package or review-round boundaries/i);
+    assert.doesNotMatch(text, /work package or Crossing boundaries/i);
+    assert.match(text, /internal audit reasoning.*never shown/is);
+    assert.doesNotMatch(text, /internal audit reasoning.*unless needed/is);
+  }
+});
+
+test("approval checkpoints link existing detail and show the work-package table", async () => {
+  const [brainstorm, plan] = await Promise.all([
+    source("commands/brainstorm.md"),
+    source("commands/plan.md"),
+  ]);
+  assert.match(brainstorm, /proposed\/unapproved specification/i);
+  assert.match(brainstorm, /write.*specification.*before.*approval/is);
+  assert.match(brainstorm, /work-package table/i);
+  assert.match(brainstorm, /AskUserQuestion.*no more than three.*link.*specification/is);
+  assert.match(plan, /work-package table/i);
+  assert.match(plan, /AskUserQuestion.*no more than three.*link.*plan/is);
+});
+
+test("review triage approval is an explicit structured checkpoint", async () => {
+  const review = await source("commands/review.md");
+  assert.match(review, /AskUserQuestion.*triage checkpoint/is);
+});
