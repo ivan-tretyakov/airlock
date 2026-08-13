@@ -159,11 +159,11 @@ When the host supports hooks, additionally write the canonical v2 contract to `.
       "root": "C:/work/product",
       "ownedPaths": ["src/**", "D:/shared/tests/**"],
       "processPaths": ["C:/work/project-docs/docs/airlock/**"],
-      "expiresAt": "2030-01-01T00:00:00.000Z",
+      "expiresAt": "<ISO-8601 UTC timestamp no more than 2 hours after dispatch>",
       "allowDispatch": false
     }
 
-Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and a bounded expiry. Keep `allowDispatch` false for a leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only read-only workers, and delete the contract after the return audit.
+Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and an ISO-8601 UTC expiry no more than 2 hours after dispatch. Keep `allowDispatch` false for a leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only read-only workers, and delete the contract after the return audit.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
 

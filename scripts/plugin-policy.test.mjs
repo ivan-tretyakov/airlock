@@ -134,6 +134,7 @@ test("browser leaves are read-only, capability-aware, and token-safe", async () 
   assert.match(metadata, /mcp__chrome-devtools__/);
   assert.doesNotMatch(metadata, /\b(?:Edit|Write|NotebookEdit|Agent)\b/);
   assert.match(browser, /if the required browser backend is unavailable, STOP and report the exact capability gap/i);
+  assert.match(browser, /must not invoke `Agent` or `Task`/i);
   for (const text of [browser, visual]) {
     assert.match(text, /never read .*console.*network.*wholesale/i);
     assert.match(text, /filtered output/i);
@@ -227,6 +228,8 @@ test("contract v2 is canonical while v1 remains compatible", async () => {
   assert.match(readme, /v1 remains supported/i);
   assert.match(readme, /common.*writes/i);
   assert.match(readme, /not hostile-process containment/i);
+  assert.match(plan, /ISO-8601 UTC timestamp no more than 2 hours after dispatch/i);
+  assert.doesNotMatch(plan, /2030-01-01T00:00:00\.000Z/);
   for (const [filename, text] of [
     ["commands/start.md", start],
     ["commands/plan.md", plan],
