@@ -130,7 +130,9 @@ It consumes a hashed `airlock.external-agent/v2` manifest, validates the exact b
 
 Copy the concise block from `PROJECT-CONVENTIONS.template.md` into project instructions. Project instructions should state that Airlock is opt-in, plus only the commands, invariants, validation commands, protected state, artifact homes, and branch policy that can change execution.
 
-The Full workflow ledger template is `references/LEDGER.template.md`.
+New Full workflow artifacts use `docs/airlock/`: the human dashboard is `STATUS.md`, with machine resume state in `ledger/`, active plans in `plans/`, active specifications in `specs/`, and fully accepted plan/spec pairs in `archive/YYYY-MM/`. Legacy `docs/ledger/`, `docs/plans/`, and `docs/specs/` paths remain readable.
+
+Reusable Full workflow templates are `references/STATUS.template.md` and `references/LEDGER.template.md`.
 
 ## Validation
 

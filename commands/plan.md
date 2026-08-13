@@ -24,12 +24,12 @@ Explicit risk decisions still apply at every size; ceremony should not outweigh 
 
 ## Write the self-contained plan
 
-Write to the project’s plans directory (default `docs/plans/YYYY-MM-DD-<topic>.md`). A fresh session must be able to execute it alone. Include:
+Write new Full plans to the canonical project plans directory (default `docs/airlock/plans/YYYY-MM-DD-<topic>.md`). Use `docs/airlock/ledger/YYYY-MM-DD-<topic>.md` for the new ledger and `docs/airlock/specs/` for its design; existing artifacts at legacy `docs/plans/`, `docs/ledger/`, and `docs/specs/` paths remain readable. A fresh session must be able to execute the plan alone. Include:
 
 1. **Goal and architecture** — what done means and which project invariants are involved.
 2. **File contract:**
    - **Owns** — exact files/globs this work may create or modify.
-   - **Process artifacts** — exact design, plan, and ledger paths, owned only by the orchestrator.
+   - **Process artifacts** — exact `docs/airlock/specs/`, `docs/airlock/plans/`, `docs/airlock/ledger/`, and `docs/airlock/STATUS.md` paths, owned only by the orchestrator.
    - **Candidate-bearing paths** — substantive code, tests, configuration, generated artifacts, and cited specs whose changes stale affected final evidence. Exclude only ledger bookkeeping and purely administrative plan progress.
    - **Must NOT touch** — load-bearing paths and other lanes’ files.
    - **STOP-and-handoff** — surface a needed unowned path; never edit it without approval.
@@ -54,6 +54,8 @@ Keep checkbox tasks small (typically 2–15 minutes). For behavior changes, foll
 
 The ledger is the only durable resume store. While work has an active pack, the orchestrator owns exactly one `## Resume checkpoint` section in the ledger. Replace its contents in place; never append checkpoint snapshots or create a parallel checkpoint file, message log, or state system.
 
+Maintain `docs/airlock/STATUS.md` from `${CLAUDE_PLUGIN_ROOT}/references/STATUS.template.md` as the replace-in-place human dashboard. It links the design, plan, and ledger but never replaces the ledger Resume checkpoint as machine resume state.
+
 Keep the checkpoint bounded to these fields:
 
 - **State:** `active` or `closed`.
@@ -70,6 +72,8 @@ Keep the checkpoint bounded to these fields:
 Refresh it after every subagent return, gate result, human checkpoint, and scope amendment, as well as before likely context compaction and before ending with unfinished work. A fresh session reads the approved design, plan, ledger, and Resume checkpoint before acting. Reference Crossing, gate, evidence, and Debug rows instead of copying history or long logs into the checkpoint.
 
 At pack acceptance, replace the checkpoint once more, set **State** to `closed`, and identify the final Crossing; do not delete it. A Light single-Crossing pack may initialize and close the same compact checkpoint in one session. A legacy ledger without this section remains valid; add it only when work is actively resumed or repaired, without retrofitting historical state.
+
+Refresh STATUS at package acceptance, review-round close, before compaction, and before ending an unfinished session. Replace it in place, never append snapshots, and retain only the five newest Recently closed rows.
 
 ## Portable execution and host routing
 

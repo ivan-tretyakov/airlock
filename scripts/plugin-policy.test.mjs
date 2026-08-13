@@ -311,3 +311,43 @@ test("review triage approval is an explicit structured checkpoint", async () => 
   const review = await source("commands/review.md");
   assert.match(review, /AskUserQuestion.*triage checkpoint/is);
 });
+
+test("Full work has one current dashboard and an archive lifecycle", async () => {
+  const [start, plan, ship, review, status] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("commands/ship.md"),
+    source("commands/review.md"),
+    source("references/STATUS.template.md"),
+  ]);
+  for (const text of [start, plan, ship, review]) assert.match(text, /docs\/airlock\/STATUS\.md/);
+  assert.match(plan, /docs\/airlock\/(?:ledger|plans|specs)/);
+  assert.match(ship, /archive\/YYYY-MM/);
+  assert.match(ship, /all work packages.*accepted/is);
+  assert.match(status, /Open work packages/);
+  assert.match(status, /Open items/);
+  assert.match(status, /Recently closed/);
+  assert.match(status, /last five/i);
+});
+
+test("MUST_FIX items age and require explicit deferral", async () => {
+  const [review, ledger] = await Promise.all([
+    source("commands/review.md"), source("references/LEDGER.template.md"),
+  ]);
+  assert.match(ledger, /Age \(rounds\)/);
+  assert.match(review, /MUST_FIX.*first/is);
+  assert.match(review, /dependency.*dispatch/is);
+  assert.match(review, /AskUserQuestion.*deferr/is);
+});
+
+test("PreCompact injects the Airlock resume reminder", async () => {
+  const hooks = JSON.parse(await source("hooks/hooks.json"));
+  const entries = hooks.hooks.PreCompact;
+  assert.ok(Array.isArray(entries) && entries.length > 0);
+  assert.match(entries[0].matcher, /manual/);
+  assert.match(entries[0].matcher, /auto/);
+  assert.match(entries[0].hooks[0].command, /precompact\.mjs/);
+  const reminder = await source("hooks/precompact.mjs");
+  assert.match(reminder, /STATUS\.md/);
+  assert.match(reminder, /design.*plan.*ledger/is);
+});

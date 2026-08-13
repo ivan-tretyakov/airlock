@@ -39,6 +39,8 @@ If a required agent type or delegation capability is unavailable, STOP and repor
 Inline execution is allowed only for Quick work. Browser driving, git history surgery, and environment repair are implementation work during Compact or Full work: delegate them or STOP.
 
 For Full work, execute only approved Airlock plans, pack/crossing routing, and canonical Airlock commands; do not redefine their semantics. On start, resume, or after compaction, read the design, plan, ledger, and its Resume checkpoint, then continue from that checkpoint.
+For new Full work, use `docs/airlock/STATUS.md`, `docs/airlock/ledger/`, `docs/airlock/plans/`, and `docs/airlock/specs/`; keep legacy `docs/ledger/`, `docs/plans/`, and `docs/specs/` readable. The ledger Resume checkpoint is machine resume state and STATUS is the replace-in-place human view. On start, resume, or after compaction, reread the design, plan, ledger checkpoint, and STATUS before dispatch.
+
 
 For each delegation, supply the pack/crossing contract verbatim, require bounded foreground evidence, serialize overlapping ownership, and audit every changed path against that contract. When the host supports hooks, write an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before a file-writing worker runs: use an absolute `root`, exact `ownedPaths`, required `processPaths`, a bounded `expiresAt`, and `allowDispatch: false` for the leaf. Delete it after the return audit. The guard then enforces file and common shell-write scope, scoped staging, and leaf-only delegation deterministically. Stop and report out-of-contract work; do not widen scope.
 
@@ -47,6 +49,8 @@ For each delegation, supply the pack/crossing contract verbatim, require bounded
 Before any external-runtime work, read `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` and apply it exactly; it is the canonical contract for route records, the pre-dispatch baseline, the strict `airlock.external-agent/v2` manifest, permissions, dispatch, recovery, and the independent candidate audit. Never dispatch through `Agent` or any relay agent; the launcher is invoked directly, exactly once, in the foreground. These invariants hold regardless: use only the approved route and specialist; do not invent routing, gates, models, commands, or scope changes; worker commit permission is `none`; independently audit the launcher-sealed candidate before acceptance; and never rewrite candidate history. For OpenCode Quick work, apply the reference's Quick rules directly without invoking a Full command; the OpenCode worker remains the task's only leaf.
 
 Use canonical ship and review at their boundaries. Refresh the ledger Resume checkpoint after every agent return, gate, checkpoint, or scope change, and before compaction or an unfinished turn-end. Record completed work, changed paths, fresh evidence, blockers/decisions, retained and temporary artifacts, and the exact next action. Classify every non-product artifact you create; retain required evidence and remove only exact task-owned temporary paths/processes. Never broadly delete or remove unknown, pre-existing, or other-lane artifacts.
+Refresh `docs/airlock/STATUS.md` at package acceptance, review-round close, before compaction, and before an unfinished session end. Never append snapshots; keep only the five newest Recently closed rows.
+
 
 Return only the outcome and actual verification. If blocked, state the cause and one next action. Name changed paths when useful. Use at most five bullets and include long logs only when needed to explain failure.
 

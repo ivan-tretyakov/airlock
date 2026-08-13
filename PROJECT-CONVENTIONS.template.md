@@ -26,7 +26,7 @@ when the main session uses Fable or an earlier Fable leaf was approved.
 - **Full test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. State whether every Crossing requires it.
 - **Typecheck / lint / build:** `<exact commands, or not applicable>`
 - **Run the app:** `<e.g. npm run dev / ./run.ps1>`
-- **Artifact homes:** designs in `<docs/specs/>`, plans in `<docs/plans/>`, ledgers in `<docs/ledger/>`
+- **Artifact homes:** current dashboard at `<docs/airlock/STATUS.md>`, designs in `<docs/airlock/specs/>`, plans in `<docs/airlock/plans/>`, ledgers in `<docs/airlock/ledger/>`, accepted plan/spec archives in `<docs/airlock/archive/YYYY-MM/>`; read legacy `<docs/specs/>`, `<docs/plans/>`, and `<docs/ledger/>` when present
 - **Review surface:** `<e.g. local diff only / a PR per piece of work>`
 - **Architecture invariants (few, explicit, load-bearing):**
   - `<e.g. modules communicate only via the event bus or injected callables>`

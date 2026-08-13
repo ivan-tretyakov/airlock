@@ -66,6 +66,10 @@ For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL
 
 ## Artifacts and cleanup
 
+For new Full work, use the canonical layout `docs/airlock/STATUS.md`, `docs/airlock/ledger/`, `docs/airlock/plans/`, `docs/airlock/specs/`, and `docs/airlock/archive/YYYY-MM/`. Read existing artifacts from legacy `docs/ledger/`, `docs/plans/`, and `docs/specs/` paths when present, but do not create new Full artifacts there.
+
+The ledger Resume checkpoint is the machine resume state; `docs/airlock/STATUS.md` is the replace-in-place human view. Refresh STATUS at package acceptance, review-round close, pre-compaction, and unfinished session end. Never append status snapshots, and keep only the five newest rows under Recently closed.
+
 Classify every non-product artifact or process created during Airlock work:
 
 - **Retained evidence:** move file-based evidence to the project-configured evidence home under a stable exact path and reference it from the applicable ledger, Crossing, or gate row. If the destination is outside the actor's allowlist, return the exact source path for an orchestrator-owned move without widening scope.
