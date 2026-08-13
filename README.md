@@ -43,6 +43,12 @@ Override classification when needed:
 
 The explicit commands live in `commands/`. They are not auto-discovered workflow skills.
 
+## Interaction Contract
+
+Airlock keeps work messages compact and uses exactly three forms: a one-line **Progress** update after a completed checkpoint or check; a structured **Decision** with concrete options and a recommendation; or a **Blocked** report naming the cause and one next action in at most three lines. Work-package and review-round boundaries use a compact `Item | State | Next | Owner` table.
+
+Design and plan approval is always an explicit structured decision. The approval message includes the package table, no more than three rationale sentences, and a link to the detailed artifact; routine internal audit reasoning stays out of user-facing output.
+
 ## Runtime Setup
 
 `/airlock:setup` writes `.airlock/config.json`:
@@ -69,6 +75,10 @@ Runtime resolution is:
 - OpenCode runs require `subagent_depth: 0` and deny `task` and interactive questions.
 - Default leaf agents use Haiku, Sonnet, or Opus aliases, never Fable.
 - Every individual Fable leaf requires fresh user approval, including under a Fable main session.
+
+## Browser Verification
+
+Full plans pin exactly one browser MCP backend in project conventions. The read-only `browser-verify` leaf preflights that backend and authentication before collecting evidence; if the capability is unavailable, Airlock reports the blocker instead of simulating verification or moving the work inline. Browser leaves request only filtered console and network output and never reproduce token-bearing URLs, credentials, cookies, local storage, or browser-profile data.
 
 ## Enforcement Hooks
 
