@@ -173,4 +173,6 @@ Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery 
 
 If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence or checkpoint history.
 
+## Approval message
+
 For each approval, use `AskUserQuestion` with concrete options and a recommendation in no more than three sentences of rationale. Link the existing written plan and its work-package table instead of streaming detail; the base interaction contract governs the rest of the user-facing message.

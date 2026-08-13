@@ -288,13 +288,20 @@ test("Airlock main routes share the complete interaction contract", async () => 
   assertInteractionContract(orchestrator, "agents/orchestrator.md");
 });
 
+function markdownSection(markdown, heading) {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = markdown.match(new RegExp(`^## ${escapedHeading}\\r?\\n([\\s\\S]*?)(?=^#{1,2} |(?![\\s\\S]))`, "m"));
+  assert.ok(match, `missing section: ${heading}`);
+  return match[0];
+}
+
 test("approval checkpoints link their detailed work-package artifacts", async () => {
   const [brainstorm, plan] = await Promise.all([
     source("commands/brainstorm.md"),
     source("commands/plan.md"),
   ]);
-  const brainstormCheckpoint = brainstorm.slice(brainstorm.indexOf('## Approval message'));
-  const planCheckpoint = plan.slice(plan.lastIndexOf('For each approval'));
+  const brainstormCheckpoint = markdownSection(brainstorm, "Approval message");
+  const planCheckpoint = markdownSection(plan, "Approval message");
   assert.match(brainstormCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*proposed\/unapproved specification.*work-package table/is);
   assert.match(planCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*written plan.*work-package table/is);
   assert.match(brainstorm, /write.*proposed\/unapproved specification.*before approval/is);
