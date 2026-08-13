@@ -35,12 +35,12 @@ The eventual Delivery Pack lifecycle is `planned → active → candidate → ac
 
 ## Lite lane
 
-For a one-file tool, script, or contained utility, present a short scope contract plus one likely Light, single-Crossing Delivery Pack and verification intent. Get approval, then go to **`plan`** (or implement directly only if genuinely trivial). Keep the gate cheap enough to use.
+For a one-file tool, script, or contained utility, present a short scope contract plus one likely Light, single-Crossing Delivery Pack and verification intent. Get approval, then go to **`plan`**. Full work never implements directly from brainstorm; if the work is genuinely trivial, reclassify it through `/airlock:start` as Quick before inline execution. Keep the gate cheap enough to use.
 
 ## Process
 
 1. **Understand the request.** Read relevant code, project instructions (`CLAUDE.md`, `AGENTS.md`, or configured equivalent), and project notes. State what you found.
-2. **Ask only design-changing questions, batched.** Use the host’s structured question tool when available, 2–4 questions max, with a recommended option and your position.
+2. **Ask only design-changing questions, batched.** Use `AskUserQuestion` for 2–4 questions max, with a recommended option and your position; if the tool is unavailable, emit BLOCKED.
 3. **Float 2–3 approaches.** Give each tradeoff and rough weight, then recommend one and explain why.
 4. **Write the proposed/unapproved specification before approval.** Save new Full work to the canonical specs directory (default `docs/airlock/specs/YYYY-MM-DD-<topic>-design.md`) so the approval link exists. Existing specifications at legacy `docs/specs/` paths remain readable. Present the design, its work-package table, verification intent, and risks; label the file proposed/unapproved.
 5. **Ask for approval.** Use `AskUserQuestion` with concrete options and a recommendation in no more than three sentences of rationale, linking the proposed/unapproved specification and work-package table. On approval, finalize the specification and invoke **`plan`**. Do not implement directly from the design.

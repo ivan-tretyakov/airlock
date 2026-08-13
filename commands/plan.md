@@ -77,11 +77,11 @@ Refresh STATUS at package acceptance, review-round close, before compaction, and
 
 ## Portable execution and host routing
 
-Record the route per pack/task; do not make one global “all inline” or “all subagents” choice.
+Full implementation routes are subagent-only. Record the route per pack/task; do not make one global agent choice for the whole plan.
 
 | Pack / Crossing / task | Work class | Host role | Mode | Why | Parallel group | Checkpoint | Owns |
 |---|---|---|---|---|---|---|---|
-| `<IDs>` | Standard | implementer | inline/subagent | `<one clause>` | A | yes/no | `<exact paths>` |
+| `<IDs>` | Standard | implementer | subagent | `<one clause>` | A | yes/no | `<exact paths>` |
 
 Portable work classes describe risk and judgment, not a vendor model:
 
@@ -94,13 +94,13 @@ Use portable host roles such as `orchestrator`, `implementer`, `investigator`, `
 
 | Host role / work class | Selected host agent or runtime | Selected available model | Independence / rationale |
 |---|---|---|---|
-| `<role> / <class>` | `<configured agent, subagent, or inline>` | `<host-selected model>` | `<why; note any independence limitation>` |
+| `<role> / <class>` | `<configured subagent or external runtime>` | `<host-selected model>` | `<why; note any independence limitation>` |
 
 Do not bake host-specific model IDs into the canonical workflow. The plan records the selected mapping; gate evidence records the effective runtime, agent, model, and variant that actually ran.
 
-**Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate two guardrails the restricted agent had by construction: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
+**Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate every permanent browser guardrail: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`; never access credentials, tokens, cookies, local storage, or browser profiles; request console and network evidence only through filtered output; and never echo token-bearing URLs. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
 
-Parallel tasks must have disjoint `Owns` sets. Serialize shared files, entry points, and project-wide configuration.
+Parallel read-only tasks may run concurrently when useful. Serialize all file-writing workers while the session-global v2 contract is active, even when `Owns` sets are disjoint; parallel writers require per-worker contracts that do not yet exist. Continue to serialize shared files, entry points, and project-wide configuration.
 
 ### Explicit external-runtime routes
 
@@ -134,7 +134,7 @@ Each final gate will record either a full commit/tree or `base SHA + staged prod
 
 ## Per-pack approval before execution
 
-When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use the host’s structured question tool when available and give a recommendation. One pack may mix inline and subagent tasks. Do not ask for a global inline/subagent choice, and do not execute a pack until its row, routing, and gates are approved.
+When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use `AskUserQuestion` and give a recommendation; if the tool is unavailable, emit BLOCKED. Do not ask for a global agent choice, and do not execute a pack until its row, routing, and gates are approved.
 
 A Light, single-Crossing pack may use one compact route row and only its genuinely required gates.
 
@@ -163,7 +163,7 @@ When the host supports hooks, additionally write the canonical v2 contract to `.
       "allowDispatch": false
     }
 
-Replace the example values with the task's absolute worker root, exact owned paths, required bookkeeping paths, and a bounded expiry. Keep `allowDispatch` false for a leaf, and delete the contract after the return audit. While active, the guard denies out-of-contract file and common shell writes, broad `git add`, and nested worker dispatch for every actor in the session.
+Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and a bounded expiry. Keep `allowDispatch` false for a leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only read-only workers, and delete the contract after the return audit.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
 
@@ -171,7 +171,7 @@ For a launcher-sealed external writer route, follow `references/EXTERNAL-RUNTIME
 
 ## Implement
 
-Activate one approved Delivery Pack and work its contiguous Crossings in order. Tasks may run in parallel only under disjoint ownership. Keep required per-Crossing checks green, turn diagnosed bugs into regression tests, and stop at planned checkpoints.
+Activate one approved Delivery Pack and work its contiguous Crossings in order. Only read-only tasks may run in parallel while the session-global v2 contract exists; serialize all file-writing workers. Keep required per-Crossing checks green, turn diagnosed bugs into regression tests, and stop at planned checkpoints.
 
 Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery Pack only when all unwaived required gates have fresh evidence for its exact candidate. Feedback after a shipped commit goes through **`review`**.
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -98,6 +99,9 @@ test("browser-role fallback is codified for hosts that defer MCP tools", async (
   const plan = await source("commands/plan.md");
   assert.match(plan, /Browser-role fallback/);
   assert.match(plan, /forced substitution, not a preference/i);
+  assert.match(plan, /never access.*credentials.*tokens.*cookies.*local storage.*browser profiles/is);
+  assert.match(plan, /console and network.*filtered/i);
+  assert.match(plan, /never echo token-bearing URLs/i);
   assert.match(plan, /no edit, stage, or commit during gate execution/i);
   assert.match(plan, /must not invoke `Agent` or `Task`/);
   assert.match(plan, /blocked`?, never simulated/i);
@@ -112,6 +116,7 @@ test("orchestrator delegation is host-compatible and never absorbs unavailable w
     source("commands/start.md"),
   ]);
   assert.match(frontmatter(orchestrator), /^\s*- "Agent"$/m);
+  assert.match(frontmatter(orchestrator), /^\s*- AskUserQuestion$/m);
   assert.doesNotMatch(frontmatter(orchestrator), /Agent\(/);
   for (const text of [orchestrator, start]) {
     assert.match(text, /delegation.*unavailable.*STOP/i);
@@ -169,13 +174,26 @@ test("external machinery lives in the canonical reference, loaded on demand", as
 test("guard hook is registered, gated on the dispatch contract, and fail-open", async () => {
   const hooks = JSON.parse(await source("hooks/hooks.json"));
   const preToolUse = hooks.hooks.PreToolUse;
-  assert.ok(Array.isArray(preToolUse) && preToolUse.length >= 2);
+  assert.ok(Array.isArray(preToolUse));
+  assert.deepEqual(
+    preToolUse.map((entry) => entry.matcher),
+    ["Bash|PowerShell", "Edit|Write|NotebookEdit|Agent|Task"],
+  );
   for (const entry of preToolUse) {
-    assert.match(entry.hooks[0].command, /guard\.mjs/);
+    assert.equal(entry.hooks.length, 1);
+    assert.equal(entry.hooks[0].type, "command");
+    assert.equal(
+      entry.hooks[0].command,
+      'node "${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs"',
+    );
   }
   assert.ok(
     preToolUse.some((entry) => /Agent/.test(entry.matcher) && /Task/.test(entry.matcher)),
     "Agent and Task calls must reach the guard",
+  );
+  assert.ok(
+    preToolUse.some((entry) => /Bash/.test(entry.matcher) && /PowerShell/.test(entry.matcher)),
+    "Bash and PowerShell calls must reach the guard",
   );
   const guard = await source("hooks/guard.mjs");
   assert.match(guard, /airlock\.contract\/v1/);
@@ -209,6 +227,16 @@ test("contract v2 is canonical while v1 remains compatible", async () => {
   assert.match(readme, /v1 remains supported/i);
   assert.match(readme, /common.*writes/i);
   assert.match(readme, /not hostile-process containment/i);
+  for (const [filename, text] of [
+    ["commands/start.md", start],
+    ["commands/plan.md", plan],
+    ["agents/orchestrator.md", orchestrator],
+    ["README.md", readme],
+  ]) {
+    assert.match(text, /top-level.*only.*processPaths.*\.airlock/is, filename + ": orchestrator scope");
+    assert.match(text, /(?:subagent|leaf|worker).*only.*ownedPaths/is, filename + ": worker scope");
+    assert.match(text, /serialize all file-writing workers/i, filename + ": writer serialization");
+  }
 });
 
 test("native workers are non-Fable leaves without delegation tools", async () => {
@@ -275,6 +303,9 @@ function assertInteractionContract(text, filename) {
   assert.match(text, /status only at work-?package or review-round boundaries/is, `${filename}: status boundary`);
   assert.match(text, /Item \| State \| Next \| Owner/, `${filename}: boundary table`);
   assert.match(text, /about fifteen lines/i, `${filename}: message cap`);
+  assert.match(text, /final success.*PROGRESS/is, `${filename}: final success form`);
+  assert.match(text, /boundary.*explicit exception.*one-line PROGRESS/is, `${filename}: boundary exception`);
+  assert.match(text, /logs.*never user-facing.*stable (?:artifact|link)/is, `${filename}: stable detail link`);
   assert.match(text, /internal audit reasoning.*never shown/is, `${filename}: audit privacy`);
   assert.match(text, /plain language/i, `${filename}: plain language`);
 }
@@ -286,6 +317,9 @@ test("Airlock main routes share the complete interaction contract", async () => 
   ]);
   assertInteractionContract(start, "commands/start.md");
   assertInteractionContract(orchestrator, "agents/orchestrator.md");
+  assert.doesNotMatch(start, /Return contract for every workflow and worker/i);
+  assert.doesNotMatch(start, /^### Interaction contract$/m);
+  assert.doesNotMatch(orchestrator, /Return only the outcome and actual verification/i);
 });
 
 function markdownSection(markdown, heading) {
@@ -305,6 +339,22 @@ test("approval checkpoints link their detailed work-package artifacts", async ()
   assert.match(brainstormCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*proposed\/unapproved specification.*work-package table/is);
   assert.match(planCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*written plan.*work-package table/is);
   assert.match(brainstorm, /write.*proposed\/unapproved specification.*before approval/is);
+});
+
+test("Full and Compact implementation routes are subagent-only", async () => {
+  const [start, orchestrator, plan, brainstorm] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+    source("commands/plan.md"),
+    source("commands/brainstorm.md"),
+  ]);
+  assert.match(start, /\| Compact .*one leaf worker/i);
+  assert.match(orchestrator, /\*\*Compact\*\*.*one leaf worker/i);
+  assert.match(plan, /Full implementation routes are subagent-only/i);
+  assert.doesNotMatch(plan, /\|\s*<IDs>\s*\|[^\r\n]*\|\s*inline(?:\/subagent)?\s*\|/i);
+  assert.doesNotMatch(plan, /mix inline and subagent tasks/i);
+  assert.match(brainstorm, /reclassify.*\/airlock:start.*Quick.*before.*inline/is);
+  assert.doesNotMatch(brainstorm, /implement directly only if genuinely trivial/i);
 });
 
 test("review triage approval is an explicit structured checkpoint", async () => {
@@ -328,6 +378,11 @@ test("Full work has one current dashboard and an archive lifecycle", async () =>
   assert.match(status, /Open items/);
   assert.match(status, /Recently closed/);
   assert.match(status, /last five/i);
+  const tables = status.match(/^\|[^\r\n]+\|\r?\n\|(?:---\|)+\r?$/gm) ?? [];
+  assert.equal(tables.length, 3, "STATUS template must contain exactly three Markdown tables");
+  assert.match(status, /\[design\]\(<spec-path>\).*\[plan\]\(<plan-path>\).*\[ledger\]\(<ledger-path>\)/);
+  assert.match(status, /Age \(rounds\)/);
+  assert.doesNotMatch(status, /^## (?:TODOs?|Bugs?)\b/im);
 });
 
 test("MUST_FIX items age and require explicit deferral", async () => {
@@ -340,16 +395,32 @@ test("MUST_FIX items age and require explicit deferral", async () => {
   assert.match(review, /AskUserQuestion.*deferr/is);
 });
 
-test("PreCompact injects the Airlock resume reminder", async () => {
-  const hooks = JSON.parse(await source("hooks/hooks.json"));
-  const entries = hooks.hooks.PreCompact;
-  assert.ok(Array.isArray(entries) && entries.length > 0);
-  assert.match(entries[0].matcher, /manual/);
-  assert.match(entries[0].matcher, /auto/);
-  assert.match(entries[0].hooks[0].command, /precompact\.mjs/);
-  const reminder = await source("hooks/precompact.mjs");
-  assert.match(reminder, /STATUS\.md/);
-  assert.match(reminder, /design.*plan.*ledger/is);
+test("SessionStart compact injects one conditional Airlock resume context line", async () => {
+  const hooksText = await source("hooks/hooks.json");
+  const hooks = JSON.parse(hooksText);
+  assert.equal(hooks.hooks.PreCompact, undefined);
+  const entries = hooks.hooks.SessionStart;
+  assert.ok(Array.isArray(entries) && entries.length === 1);
+  assert.equal(entries[0].matcher, "compact");
+  assert.match(entries[0].hooks[0].command, /compact-context\.mjs/);
+
+  const scriptPath = path.join(root, "hooks", "compact-context.mjs");
+  const result = spawnSync(process.execPath, [scriptPath], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  const lines = result.stdout.trimEnd().split(/\r?\n/);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /When Airlock Full work is active/i);
+  assert.match(lines[0], /otherwise ignore/i);
+  assert.match(lines[0], /design.*plan.*ledger Resume checkpoint.*docs\/airlock\/STATUS\.md/i);
+
+  const policySources = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("agents/orchestrator.md"),
+    source("README.md"),
+  ]);
+  assert.doesNotMatch([hooksText, ...policySources].join("\n"), /PreCompact/i);
 });
 
 test("code leaves simplify only their own GREEN changes before return", async () => {

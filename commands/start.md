@@ -15,13 +15,15 @@ Task and optional overrides:
 
 ## Output
 
-- Lead with the result, decision, or next action.
-- Use numbered steps only when the user must perform more than one action.
-- Keep lists to five items or fewer; split longer material by priority.
-- Omit preambles, recaps, tangents, and closing pleasantries.
-- During work, report only meaningful state changes. On success, state the outcome and verification. When blocked, state the cause and one next action.
-- Return contract for every workflow and worker: lead with the result; include changed paths and actual evidence only when present; if blocked, state the cause and one next action; use at most five bullets; omit empty sections; include long logs only when needed to explain failure.
+Every user-facing message is exactly one of three forms:
 
+- **PROGRESS:** one line with the meaningful state change and next action. Final success is a PROGRESS message that states the outcome and actual verification.
+- **DECISION:** use `AskUserQuestion` for every approval or design-changing choice, with concrete options and a recommendation in no more than three concise sentences linking the relevant specification or plan. If that tool is unavailable, emit BLOCKED instead of substituting an unstructured approval.
+- **BLOCKED:** at most three lines: cause, impact, and one exact next action or decision needed.
+
+Show status only at work-package or review-round boundaries. At each boundary, `Item | State | Next | Owner` is the explicit exception to one-line PROGRESS when it clarifies handoff; keep the whole message to about fifteen lines. Within any form, use at most five bullets, lead with the result, and omit preambles, recaps, tangents, and closing pleasantries.
+
+Long logs are never user-facing; when detail is necessary, provide a stable artifact/link. Keep internal audit reasoning and deliberation never shown; state only actionable facts, useful changed paths, and actual evidence. Use plain language in user messages: work package (Delivery Pack), checkpoint commit (Crossing), check (gate), exact code being verified (candidate), approved skip (waiver), parallel workstream (lane), and test-fix-simplify (RED-GREEN-refactor). Artifacts retain canonical terms for grep-ability.
 These rules adapt the action-first principles of `ayghri/i-have-adhd`; task completeness and safety take precedence over brevity.
 
 ## Runtime
@@ -43,7 +45,7 @@ Classify task complexity and workflow weight separately. State the result in one
 | Workflow | Use when | Execution | Artifacts |
 |---|---|---|---|
 | Quick | Trivial or Light: mechanical, tightly contained, low risk, obvious verification | One execution end-to-end: one leaf worker, or the main session inline when it already holds the needed context and the change is small. The main session audits scope, changed paths, and result either way. | No design, plan, ledger, Crossing, or independent review. |
-| Compact | Standard: contained implementation with clear seams and focused tests | One short in-chat scope, normally one leaf worker, and only risk-relevant verification. | No durable workflow files unless work must span sessions. |
+| Compact | Standard: contained implementation with clear seams and focused tests | One short in-chat scope, exactly one leaf worker for implementation, and only risk-relevant verification. | No durable workflow files unless work must span sessions. |
 | Full | Complex or Critical: cross-cutting design, difficult diagnosis, safety-sensitive, irreversible, public-contract, external-state, migration, or expensive-to-unwind work | Use explicit `/airlock:brainstorm`, `/airlock:plan`, `/airlock:ship`, `/airlock:review`, and `/airlock:debug` boundaries as applicable. Start at the Full-lite shape in `plan` unless scale demands more. | Design, plan, ledger, Crossings, and selected gates. |
 
 Ambiguity about intent or blast radius escalates one level. Security, credentials, destructive actions, migrations, production/live mutations, external publication, and irreversible work always use Full. A user override cannot remove a required safety confirmation.
@@ -58,7 +60,7 @@ Only this main session may delegate. Every worker is a leaf and must not invoke 
 
 Use the configured non-Fable leaf for the work class. Never select, inherit, or override a leaf to Fable without asking the user immediately before that individual invocation. This approval is required for every Fable leaf, even when the main session uses Fable or the user approved an earlier Fable leaf. Record approval in the dispatch prompt. Do not treat selection of Fable for the main session as subagent approval.
 
-When the host supports hooks, write an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before a file-writing worker runs. Set `root` to the absolute worker root; put product scope in `ownedPaths`, any additional bookkeeping scope in `processPaths`, a bounded ISO-8601 lifetime in `expiresAt`, and `allowDispatch: false` for every leaf. Delete the contract after the return audit. While it exists, the plugin guard blocks out-of-contract file and common shell writes, broad `git add`, and worker delegation.
+When the host supports hooks, write an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before a file-writing worker runs. Set `root` to the absolute worker root; put product scope in `ownedPaths`, exact orchestrator bookkeeping scope in `processPaths`, a bounded ISO-8601 lifetime in `expiresAt`, and `allowDispatch: false` for every leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While v2 is active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. The guard applies broad Git staging and obvious write checks to Bash and PowerShell. Delete the contract after the return audit. Serialize all file-writing workers while the session-global contract is active; parallelize only read-only workers until per-worker contracts exist.
 
 If a required agent type or delegation capability is unavailable, STOP and report the outage. Delegation being unavailable never authorizes inline implementation.
 
@@ -82,13 +84,3 @@ Never broad-glob cleanup or delete unknown, pre-existing, user-owned, or another
 ## Execute
 
 If `$ARGUMENTS` contains a task, classify and execute it now. If it contains only options or is empty, report Airlock active, resolved runtime, and the one-line syntax for submitting the task. Do not start another workflow merely to activate the mode.
-
-### Interaction contract
-
-- Every user-facing message is exactly one of three forms: **PROGRESS**, **DECISION**, or **BLOCKED**. Lead with the result, decision, or next action.
-- **PROGRESS:** one line stating the meaningful state change and next action. Use status only at work-package or review-round boundaries.
-- **DECISION:** use `AskUserQuestion` for every approval or design-changing choice; present concrete options and a recommendation in no more than three concise sentences that link the relevant specification or plan instead of streaming it.
-- **BLOCKED:** at most three lines: cause, impact, and one exact next action or decision needed.
-- At a work-package or review-round boundary, use this compact status table when it clarifies handoff: `Item | State | Next | Owner`. Keep the whole message to about fifteen lines.
-- Keep internal audit reasoning, deliberation, and logs never shown. State only the actionable blocked cause; include changed paths and actual evidence when useful; omit empty sections.
-- Use plain language in user messages: work package (Delivery Pack), checkpoint commit (Crossing), check (gate), exact code being verified (candidate), approved skip (waiver), parallel workstream (lane), and test-fix-simplify (RED-GREEN-refactor). Artifacts retain canonical terms for grep-ability.
