@@ -32,6 +32,8 @@ Resolve runtime in this order:
 2. `.airlock/config.json` in the project root.
 3. `native`.
 
+Check whether `.airlock/config.json` exists before reading it. When absent, resolve to `native` without a visible read error.
+
 `native` uses only the current host and its leaf subagents. `opencode` uses the deterministic external launcher only on a local host with Node.js, Git, and OpenCode available; before any external work, read `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` — the canonical external contract. Cowork web/mobile and any host without those executables must stop with the missing capability; never silently fall back or install dependencies.
 
 ## Classify

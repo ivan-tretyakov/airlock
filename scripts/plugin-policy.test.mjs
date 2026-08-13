@@ -351,3 +351,19 @@ test("PreCompact injects the Airlock resume reminder", async () => {
   assert.match(reminder, /STATUS\.md/);
   assert.match(reminder, /design.*plan.*ledger/is);
 });
+
+test("code leaves simplify only their own GREEN changes before return", async () => {
+  for (const filename of ["code-light.md", "code-standard.md", "code-complex.md", "code-critical.md"]) {
+    const text = await source(path.join("agents", filename));
+    assert.match(text, /after GREEN/i, filename);
+    assert.match(text, /simplif/i, filename);
+    assert.match(text, /same owned paths/i, filename);
+    assert.match(text, /tests stay green|rerun.*test/i, filename);
+  }
+});
+
+test("missing runtime configuration is checked silently", async () => {
+  const start = await source("commands/start.md");
+  assert.match(start, /check whether `.airlock\/config\.json` exists before reading/i);
+  assert.match(start, /when absent.*native.*without.*error/is);
+});
