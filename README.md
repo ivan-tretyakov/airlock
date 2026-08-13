@@ -72,7 +72,9 @@ Runtime resolution is:
 
 ## Enforcement Hooks
 
-The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes a dispatch contract to `.airlock/contract.json` (schema `airlock.contract/v1`). While the contract exists, the hook deterministically blocks file writes outside `ownedPaths` and broad staging (`git add -A`, `git add --all`, `git add .`) for every actor in the session, then goes silent again when the contract is deleted after the return audit. The hook is fail-open: a missing or malformed contract never blocks anything.
+The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, writable `processPaths`, contract expiry, and `allowDispatch` (false by default). It also keeps the active contract directory plus `docs/airlock/**`, `docs/ledger/**`, `docs/plans/**`, and `docs/specs/**` writable for process bookkeeping.
+
+While a valid active v2 contract exists, the hook blocks file writes outside the combined owned and process paths, worker delegation unless explicitly allowed, broad staging (`git add -A`, `git add --all`, `git add .`), and obvious out-of-contract redirection or `tee` targets. Bash screening catches common writes but is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 
 ## Context Discipline
 

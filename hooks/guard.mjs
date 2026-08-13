@@ -1,21 +1,28 @@
 // Airlock guard hook (PreToolUse).
 //
 // Inert unless an active dispatch contract exists: the orchestrator writes
-// `.airlock/contract.json` (schema `airlock.contract/v1`) immediately before a
+// `.airlock/contract.json` (schema `airlock.contract/v2`) immediately before a
 // file-writing worker runs and deletes it after the return audit. While the
 // contract exists, this hook deterministically:
 //   1. denies Edit/Write/NotebookEdit targets outside the contract's
-//      `ownedPaths` (the `.airlock/` directory itself stays writable so the
-//      orchestrator can manage the contract); and
-//   2. denies broad staging (`git add -A`, `git add --all`, `git add .`) in
-//      Bash commands, enforcing the scoped-add rule from `ship`.
+//      owned and process paths;
+//   2. denies worker dispatch unless the contract explicitly allows it; and
+//   3. denies broad staging plus obvious out-of-contract shell writes.
 //
 // Fail-open by design: a missing, unreadable, or malformed contract, or any
 // internal error, allows the tool call. The hook narrows behavior only when
-// the orchestrator has explicitly declared a contract.
+// the orchestrator has explicitly declared a contract. Contract v1 retains
+// its original behavior for compatibility.
 
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
+
+const DEFAULT_PROCESS_PATHS = [
+  "docs/airlock/**",
+  "docs/ledger/**",
+  "docs/plans/**",
+  "docs/specs/**",
+];
 
 function allow() {
   process.exit(0);
@@ -117,6 +124,39 @@ function pathAllowed(relativePath, ownedPaths) {
   return false;
 }
 
+function contractExpired(contract, now = Date.now()) {
+  if (contract.expiresAt === undefined) return false;
+  const expiresAt = Date.parse(contract.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= now;
+}
+
+function normalizeAbsolute(absolutePath) {
+  const normalized = path.normalize(String(absolutePath))
+    .split(path.sep)
+    .join("/")
+    .replace(/\\/g, "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function absolutePattern(entry, root) {
+  return normalizeAbsolute(path.isAbsolute(entry) ? entry : path.resolve(root, entry));
+}
+
+function patternMatchesAbsolute(target, pattern) {
+  if (pattern.endsWith("/")) {
+    return target.startsWith(pattern) || target + "/" === pattern;
+  }
+  if (target === pattern) {
+    return true;
+  }
+  return /[*?]/.test(pattern) && globToRegExp(pattern).test(target);
+}
+
+function pathAllowedAbsolute(absoluteTarget, patterns) {
+  const target = normalizeAbsolute(absoluteTarget);
+  return patterns.some((pattern) => patternMatchesAbsolute(target, pattern));
+}
+
 function broadGitAdd(command) {
   // Examine each shell segment so `git commit -m "x" && git add -A` is caught
   // while `grep "git add -A" notes.md` inside quotes is tolerated as a
@@ -163,6 +203,70 @@ function broadGitAdd(command) {
   return false;
 }
 
+function shellTokens(command) {
+  return String(command).match(
+    /"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\r?\n|&\d+|>>|<<|>|<|&&|\|\||[|;]|[^\s><|;&]+/g,
+  ) ?? [];
+}
+
+function unquoteShellToken(token) {
+  if (
+    token.length >= 2 &&
+    ((token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'")))
+  ) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+function parseObviousShellWriteOperands(command) {
+  const tokens = shellTokens(command);
+  const targets = [];
+  const operators = new Set([
+    "&&", "||", "|", ";", "\n", "\r\n", ">", ">>", "<", "<<",
+  ]);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === ">" || token === ">>") {
+      const target = tokens[index + 1];
+      if (target && !operators.has(target) && !/^&\d+$/.test(target)) {
+        targets.push(unquoteShellToken(target));
+      }
+      continue;
+    }
+    const commandBoundary =
+      index === 0 ||
+      ["&&", "||", "|", ";", "\n", "\r\n"].includes(tokens[index - 1]);
+    if (!commandBoundary || !/^tee(?:\.exe)?$/i.test(token)) {
+      continue;
+    }
+    let parsingOptions = true;
+    for (let operandIndex = index + 1; operandIndex < tokens.length; operandIndex += 1) {
+      const operand = tokens[operandIndex];
+      if (operators.has(operand)) {
+        break;
+      }
+      if (parsingOptions && operand === "--") {
+        parsingOptions = false;
+        continue;
+      }
+      if (parsingOptions && operand.startsWith("-")) {
+        continue;
+      }
+      parsingOptions = false;
+      targets.push(unquoteShellToken(operand));
+    }
+  }
+  return targets.filter((target) => target.length > 0);
+}
+
+function shellWriteTargets(command, workingDirectory) {
+  return parseObviousShellWriteOperands(command)
+    .map((target) => path.resolve(workingDirectory, target));
+}
+
 function main() {
   let input;
   try {
@@ -189,6 +293,78 @@ function main() {
     allow();
     return;
   }
+
+  if (contract?.schema === "airlock.contract/v2") {
+    if (
+      !Array.isArray(contract.ownedPaths) ||
+      (contract.processPaths !== undefined && !Array.isArray(contract.processPaths))
+    ) {
+      allow();
+      return;
+    }
+    if (contractExpired(contract)) {
+      allow();
+      return;
+    }
+
+    const contractRoot = contract.root === undefined ? located.root : contract.root;
+    if (typeof contractRoot !== "string" || !path.isAbsolute(contractRoot)) {
+      allow();
+      return;
+    }
+    const patternEntries = [
+      ...contract.ownedPaths,
+      ...(contract.processPaths ?? []),
+      ...DEFAULT_PROCESS_PATHS,
+    ].filter((entry) => typeof entry === "string" && entry.length > 0);
+    const patterns = patternEntries.map((entry) => absolutePattern(entry, contractRoot));
+    patterns.push(absolutePattern(path.join(path.dirname(located.contractPath), "**"), contractRoot));
+
+    if ((toolName === "Agent" || toolName === "Task") && contract.allowDispatch !== true) {
+      deny(
+        "Airlock contract active: worker dispatch is blocked unless allowDispatch is explicitly true.",
+      );
+      return;
+    }
+
+    if (toolName === "Bash") {
+      const command = toolInput?.command ?? "";
+      if (broadGitAdd(command)) {
+        deny(
+          "Airlock contract active: broad staging is blocked. Use scoped git add with exact paths for the current Crossing.",
+        );
+        return;
+      }
+      const deniedTarget = shellWriteTargets(command, workingDirectory)
+        .find((target) => !pathAllowedAbsolute(target, patterns));
+      if (deniedTarget) {
+        deny(
+          "Airlock contract active: shell write target " + deniedTarget +
+            " is outside owned and process paths. STOP and report instead of writing it.",
+        );
+        return;
+      }
+      allow();
+      return;
+    }
+
+    const v2FilePath = toolInput?.file_path ?? toolInput?.notebook_path ?? "";
+    if (!v2FilePath) {
+      allow();
+      return;
+    }
+    const v2Absolute = path.resolve(workingDirectory, String(v2FilePath));
+    if (!pathAllowedAbsolute(v2Absolute, patterns)) {
+      deny(
+        "Airlock contract active: " + v2Absolute +
+          " is outside owned and process paths. STOP and report instead of editing it.",
+      );
+      return;
+    }
+    allow();
+    return;
+  }
+
   if (
     contract?.schema !== "airlock.contract/v1" ||
     !Array.isArray(contract?.ownedPaths)

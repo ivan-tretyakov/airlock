@@ -148,7 +148,18 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 
 Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the base-rules return contract. Every worker is a leaf: do not give it `Agent`, `Task`, workflow, or external-delegation tools. Never route a leaf to Fable without fresh user approval immediately before that individual dispatch; record the approval in the dispatch prompt.
 
-When the host supports hooks, additionally write the contract to `.airlock/contract.json` as `{"schema": "airlock.contract/v1", "ownedPaths": ["<exact path or glob>", ...]}` before the worker runs and delete it after the return audit. While it exists, the plugin's guard hook denies writes outside `ownedPaths` and broad `git add` for every actor in the session, turning the prose contract into deterministic enforcement.
+When the host supports hooks, additionally write the canonical v2 contract to `.airlock/contract.json` before the worker runs:
+
+    {
+      "schema": "airlock.contract/v2",
+      "root": "C:/work/product",
+      "ownedPaths": ["src/**", "D:/shared/tests/**"],
+      "processPaths": ["C:/work/project-docs/docs/airlock/**"],
+      "expiresAt": "2030-01-01T00:00:00.000Z",
+      "allowDispatch": false
+    }
+
+Replace the example values with the task's absolute worker root, exact owned paths, required bookkeeping paths, and a bounded expiry. Keep `allowDispatch` false for a leaf, and delete the contract after the return audit. While active, the guard denies out-of-contract file and common shell writes, broad `git add`, and nested worker dispatch for every actor in the session.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
 

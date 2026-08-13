@@ -173,8 +173,13 @@ test("guard hook is registered, gated on the dispatch contract, and fail-open", 
   for (const entry of preToolUse) {
     assert.match(entry.hooks[0].command, /guard\.mjs/);
   }
+  assert.ok(
+    preToolUse.some((entry) => /Agent/.test(entry.matcher) && /Task/.test(entry.matcher)),
+    "Agent and Task calls must reach the guard",
+  );
   const guard = await source("hooks/guard.mjs");
   assert.match(guard, /airlock\.contract\/v1/);
+  assert.match(guard, /airlock\.contract\/v2/);
   assert.match(guard, /Fail-open by design/i);
   const retiredAgent = path.join(agentsDirectory, "external-runner.md");
   let retiredExists = true;
@@ -184,6 +189,26 @@ test("guard hook is registered, gated on the dispatch contract, and fail-open", 
     retiredExists = error.code !== "ENOENT";
   }
   assert.equal(retiredExists, false, "external-runner tombstone must stay deleted");
+});
+
+test("contract v2 is canonical while v1 remains compatible", async () => {
+  const [start, plan, orchestrator, readme] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("agents/orchestrator.md"),
+    source("README.md"),
+  ]);
+  for (const [filename, text] of [
+    ["commands/start.md", start],
+    ["commands/plan.md", plan],
+    ["agents/orchestrator.md", orchestrator],
+    ["README.md", readme],
+  ]) {
+    assert.match(text, /airlock\.contract\/v2/, filename + " must name v2 as canonical");
+  }
+  assert.match(readme, /v1 remains supported/i);
+  assert.match(readme, /common.*writes/i);
+  assert.match(readme, /not hostile-process containment/i);
 });
 
 test("native workers are non-Fable leaves without delegation tools", async () => {

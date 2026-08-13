@@ -56,7 +56,7 @@ Only this main session may delegate. Every worker is a leaf and must not invoke 
 
 Use the configured non-Fable leaf for the work class. Never select, inherit, or override a leaf to Fable without asking the user immediately before that individual invocation. This approval is required for every Fable leaf, even when the main session uses Fable or the user approved an earlier Fable leaf. Record approval in the dispatch prompt. Do not treat selection of Fable for the main session as subagent approval.
 
-When the host supports hooks, write the dispatch contract to `.airlock/contract.json` (schema `airlock.contract/v1`, field `ownedPaths`) before a file-writing worker runs and delete it after the return audit; the plugin's guard hook then blocks out-of-contract writes and broad `git add` deterministically while it exists.
+When the host supports hooks, write an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before a file-writing worker runs. Set `root` to the absolute worker root; put product scope in `ownedPaths`, any additional bookkeeping scope in `processPaths`, a bounded ISO-8601 lifetime in `expiresAt`, and `allowDispatch: false` for every leaf. Delete the contract after the return audit. While it exists, the plugin guard blocks out-of-contract file and common shell writes, broad `git add`, and worker delegation.
 
 If a required agent type or delegation capability is unavailable, STOP and report the outage. Delegation being unavailable never authorizes inline implementation.
 

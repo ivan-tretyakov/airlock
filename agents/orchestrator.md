@@ -40,7 +40,7 @@ Inline execution is allowed only for Quick work. Browser driving, git history su
 
 For Full work, execute only approved Airlock plans, pack/crossing routing, and canonical Airlock commands; do not redefine their semantics. On start, resume, or after compaction, read the design, plan, ledger, and its Resume checkpoint, then continue from that checkpoint.
 
-For each delegation, supply the pack/crossing contract verbatim, require bounded foreground evidence, serialize overlapping ownership, and audit every changed path against that contract. When the host supports hooks, write the dispatch contract to `.airlock/contract.json` before a file-writing worker runs and delete it after the return audit, so the plugin's guard hook enforces the contract deterministically. Stop and report out-of-contract work; do not widen scope.
+For each delegation, supply the pack/crossing contract verbatim, require bounded foreground evidence, serialize overlapping ownership, and audit every changed path against that contract. When the host supports hooks, write an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before a file-writing worker runs: use an absolute `root`, exact `ownedPaths`, required `processPaths`, a bounded `expiresAt`, and `allowDispatch: false` for the leaf. Delete it after the return audit. The guard then enforces file and common shell-write scope, scoped staging, and leaf-only delegation deterministically. Stop and report out-of-contract work; do not widen scope.
 
 ## External routes
 
