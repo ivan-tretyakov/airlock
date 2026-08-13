@@ -267,52 +267,37 @@ test("release metadata agrees and credits the concise-output inspiration", async
   assert.match(readme, /Cowork/);
 });
 
-test("Airlock user messages follow one explicit interaction contract", async () => {
-  const start = await source("commands/start.md");
-  assert.match(start, /exactly one of three forms/i);
-  assert.match(start, /PROGRESS.*one line/is);
-  assert.match(start, /DECISION.*AskUserQuestion/is);
-  assert.match(start, /BLOCKED.*at most three lines/is);
-  assert.match(start, /Item \| State \| Next \| Owner/);
-  assert.match(start, /about fifteen lines/i);
-  assert.match(start, /internal.*audit reasoning.*never shown/is);
-  assert.match(start, /plain language/i);
-});
+function assertInteractionContract(text, filename) {
+  assert.match(text, /exactly one of three forms/i, `${filename}: three forms`);
+  assert.match(text, /PROGRESS.*one line/is, `${filename}: progress is one line`);
+  assert.match(text, /DECISION.*AskUserQuestion.*concrete options.*recommendation/is, `${filename}: decisions are structured`);
+  assert.match(text, /BLOCKED.*at most three lines/is, `${filename}: blocked is bounded`);
+  assert.match(text, /status only at work-?package or review-round boundaries/is, `${filename}: status boundary`);
+  assert.match(text, /Item \| State \| Next \| Owner/, `${filename}: boundary table`);
+  assert.match(text, /about fifteen lines/i, `${filename}: message cap`);
+  assert.match(text, /internal audit reasoning.*never shown/is, `${filename}: audit privacy`);
+  assert.match(text, /plain language/i, `${filename}: plain language`);
+}
 
-test("design and plan approvals link detail instead of streaming it", async () => {
-  for (const file of ["commands/brainstorm.md", "commands/plan.md"]) {
-    const text = await source(file);
-    assert.match(text, /no more than three sentences/i);
-    assert.match(text, /link.*(?:specification|plan)/i);
-    assert.match(text, /AskUserQuestion/);
-  }
-});
-
-test("interaction contract requires concrete decisions and review-round boundaries", async () => {
+test("Airlock main routes share the complete interaction contract", async () => {
   const [start, orchestrator] = await Promise.all([
     source("commands/start.md"),
     source("agents/orchestrator.md"),
   ]);
-  for (const text of [start, orchestrator]) {
-    assert.match(text, /DECISION.*concrete options.*recommendation/is);
-    assert.match(text, /work-?package or review-round boundaries/i);
-    assert.doesNotMatch(text, /work package or Crossing boundaries/i);
-    assert.match(text, /internal audit reasoning.*never shown/is);
-    assert.doesNotMatch(text, /internal audit reasoning.*unless needed/is);
-  }
+  assertInteractionContract(start, "commands/start.md");
+  assertInteractionContract(orchestrator, "agents/orchestrator.md");
 });
 
-test("approval checkpoints link existing detail and show the work-package table", async () => {
+test("approval checkpoints link their detailed work-package artifacts", async () => {
   const [brainstorm, plan] = await Promise.all([
     source("commands/brainstorm.md"),
     source("commands/plan.md"),
   ]);
-  assert.match(brainstorm, /proposed\/unapproved specification/i);
-  assert.match(brainstorm, /write.*specification.*before.*approval/is);
-  assert.match(brainstorm, /work-package table/i);
-  assert.match(brainstorm, /AskUserQuestion.*no more than three.*link.*specification/is);
-  assert.match(plan, /work-package table/i);
-  assert.match(plan, /AskUserQuestion.*no more than three.*link.*plan/is);
+  const brainstormCheckpoint = brainstorm.slice(brainstorm.indexOf('## Approval message'));
+  const planCheckpoint = plan.slice(plan.lastIndexOf('For each approval'));
+  assert.match(brainstormCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*proposed\/unapproved specification.*work-package table/is);
+  assert.match(planCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*written plan.*work-package table/is);
+  assert.match(brainstorm, /write.*proposed\/unapproved specification.*before approval/is);
 });
 
 test("review triage approval is an explicit structured checkpoint", async () => {
