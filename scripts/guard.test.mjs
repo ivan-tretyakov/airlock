@@ -120,6 +120,8 @@ test("guard denies broad git add while a contract is active", async (t) => {
     "git add .",
     "git commit -m x && git add -A",
     "git -C sub add .",
+    "git add -u",
+    "git add --update",
   ]) {
     const verdict = runGuard({
       tool_name: "Bash",
@@ -138,6 +140,8 @@ test("guard allows scoped git add and unrelated commands", async (t) => {
     "git status --porcelain=v2",
     "npm test",
     "git add docs/design/notes.md",
+    "git add -u -- src/feature.ts",
+    "git add --update src/feature.ts",
   ]) {
     const verdict = runGuard({
       tool_name: "Bash",
@@ -185,17 +189,18 @@ test("v2 supports absolute owned paths under multiple roots", async (t) => {
   }
 });
 
-test("v2 allows process paths and ignores expired contracts", async (t) => {
+test("v2 allows custom absolute process paths and ignores expired contracts", async (t) => {
   const root = await makeProject(t);
+  const processRoot = await makeProject(t);
   await writeContract(root, {
     schema: "airlock.contract/v2",
     ownedPaths: ["src/**"],
-    processPaths: ["docs/airlock/**"],
+    processPaths: [path.join(processRoot, "evidence/**")],
     expiresAt: "2030-01-01T00:00:00.000Z",
   });
   assert.equal(runGuard({
     tool_name: "Write",
-    tool_input: { file_path: path.join(root, "docs/airlock/STATUS.md") },
+    tool_input: { file_path: path.join(processRoot, "evidence/STATUS.md") },
     cwd: root,
   }).decision, "allow");
   await writeContract(root, {
@@ -208,6 +213,47 @@ test("v2 allows process paths and ignores expired contracts", async (t) => {
     tool_input: { file_path: path.join(root, "package.json") },
     cwd: root,
   }).decision, "allow");
+});
+
+test("v2 fails open for malformed field values", async (t) => {
+  const root = await makeProject(t);
+  const malformedContracts = [
+    {
+      schema: "airlock.contract/v2",
+      ownedPaths: [],
+      expiresAt: "not-a-timestamp",
+    },
+    {
+      schema: "airlock.contract/v2",
+      ownedPaths: [],
+      expiresAt: 0,
+    },
+    {
+      schema: "airlock.contract/v2",
+      ownedPaths: ["src/**", 42],
+    },
+    {
+      schema: "airlock.contract/v2",
+      ownedPaths: [],
+      processPaths: ["docs/airlock/**", ""],
+    },
+    {
+      schema: "airlock.contract/v2",
+      ownedPaths: [],
+      allowDispatch: "false",
+    },
+  ];
+  for (const contract of malformedContracts) {
+    await writeContract(root, contract);
+    const input = contract.allowDispatch === undefined
+      ? {
+          tool_name: "Write",
+          tool_input: { file_path: path.join(root, "package.json") },
+          cwd: root,
+        }
+      : { tool_name: "Agent", tool_input: {}, cwd: root };
+    assert.equal(runGuard(input).decision, "allow", JSON.stringify(contract));
+  }
 });
 
 test("v2 denies worker dispatch unless explicitly allowed", async (t) => {

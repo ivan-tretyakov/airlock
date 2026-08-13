@@ -130,6 +130,62 @@ function contractExpired(contract, now = Date.now()) {
   return Number.isFinite(expiresAt) && expiresAt <= now;
 }
 
+function validIsoTimestamp(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+  );
+  if (!match || !Number.isFinite(Date.parse(value))) {
+    return false;
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, zone] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return false;
+  }
+  if (zone !== "Z") {
+    const [zoneHour, zoneMinute] = zone.slice(1).split(":").map(Number);
+    if (zoneHour > 23 || zoneMinute > 59) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function validPathEntries(entries) {
+  return (
+    Array.isArray(entries) &&
+    entries.every((entry) => typeof entry === "string" && entry.length > 0)
+  );
+}
+
+function validV2Contract(contract) {
+  return (
+    validPathEntries(contract.ownedPaths) &&
+    (contract.root === undefined ||
+      (typeof contract.root === "string" && path.isAbsolute(contract.root))) &&
+    (contract.processPaths === undefined || validPathEntries(contract.processPaths)) &&
+    (contract.expiresAt === undefined || validIsoTimestamp(contract.expiresAt)) &&
+    (contract.allowDispatch === undefined || typeof contract.allowDispatch === "boolean")
+  );
+}
+
 function normalizeAbsolute(absolutePath) {
   const normalized = path.normalize(String(absolutePath))
     .split(path.sep)
@@ -187,6 +243,18 @@ function broadGitAdd(command) {
       continue;
     }
     const addArguments = tokens.slice(addIndex + 1);
+    const updateRequested = addArguments.some(
+      (argument) => argument === "-u" || argument === "--update",
+    );
+    if (updateRequested) {
+      const separatorIndex = addArguments.indexOf("--");
+      const pathspecs = separatorIndex === -1
+        ? addArguments.filter((argument) => !argument.startsWith("-"))
+        : addArguments.slice(separatorIndex + 1);
+      if (pathspecs.length === 0) {
+        return true;
+      }
+    }
     if (
       addArguments.some(
         (argument) =>
@@ -295,10 +363,7 @@ function main() {
   }
 
   if (contract?.schema === "airlock.contract/v2") {
-    if (
-      !Array.isArray(contract.ownedPaths) ||
-      (contract.processPaths !== undefined && !Array.isArray(contract.processPaths))
-    ) {
+    if (!validV2Contract(contract)) {
       allow();
       return;
     }
@@ -307,11 +372,7 @@ function main() {
       return;
     }
 
-    const contractRoot = contract.root === undefined ? located.root : contract.root;
-    if (typeof contractRoot !== "string" || !path.isAbsolute(contractRoot)) {
-      allow();
-      return;
-    }
+    const contractRoot = contract.root ?? located.root;
     const patternEntries = [
       ...contract.ownedPaths,
       ...(contract.processPaths ?? []),
