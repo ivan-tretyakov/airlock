@@ -58,6 +58,10 @@ Use the configured non-Fable leaf for the work class. Never select, inherit, or 
 
 When the host supports hooks, write the dispatch contract to `.airlock/contract.json` (schema `airlock.contract/v1`, field `ownedPaths`) before a file-writing worker runs and delete it after the return audit; the plugin's guard hook then blocks out-of-contract writes and broad `git add` deterministically while it exists.
 
+If a required agent type or delegation capability is unavailable, STOP and report the outage. Delegation being unavailable never authorizes inline implementation.
+
+Inline execution is allowed only for Quick work. Browser driving, git history surgery, and environment repair are implementation work during Compact or Full work: delegate them or STOP.
+
 For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` directly. For Quick work, derive the exact manifest scope from the user's request, use task-owned Quick identifiers where the strict schema requires pack or Crossing identifiers, and create no workflow artifacts. For Full work, follow the canonical Full commands. The OpenCode worker remains a leaf with `task` and interactive questions denied. External execution is never selected merely because it is configured: use it only after Airlock is explicitly started for the task.
 
 ## Artifacts and cleanup

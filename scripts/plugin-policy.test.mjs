@@ -16,6 +16,7 @@ const leafAgents = [
   "verify.md",
   "review.md",
   "visual-review.md",
+  "browser-verify.md",
 ];
 
 async function source(relativePath) {
@@ -91,6 +92,52 @@ test("start.md carries the canonical base rules other commands reference", async
     const text = await source(path.join("commands", command));
     assert.match(text, /base rules|base-rules/i, `${command} must reference the base rules`);
   }
+});
+
+test("browser-role fallback is codified for hosts that defer MCP tools", async () => {
+  const plan = await source("commands/plan.md");
+  assert.match(plan, /Browser-role fallback/);
+  assert.match(plan, /forced substitution, not a preference/i);
+  assert.match(plan, /no edit, stage, or commit during gate execution/i);
+  assert.match(plan, /must not invoke `Agent` or `Task`/);
+  assert.match(plan, /blocked`?, never simulated/i);
+  const visualReview = await source("agents/visual-review.md");
+  assert.match(visualReview, /STOP immediately and report the exact capability gap/i);
+  assert.match(visualReview, /never simulate, infer, or fabricate/i);
+});
+
+test("orchestrator delegation is host-compatible and never absorbs unavailable work", async () => {
+  const [orchestrator, start] = await Promise.all([
+    source("agents/orchestrator.md"),
+    source("commands/start.md"),
+  ]);
+  assert.match(frontmatter(orchestrator), /^\s*- "Agent"$/m);
+  assert.doesNotMatch(frontmatter(orchestrator), /Agent\(/);
+  for (const text of [orchestrator, start]) {
+    assert.match(text, /delegation.*unavailable.*STOP/i);
+    assert.match(text, /never authorizes inline implementation/i);
+    assert.match(text, /inline execution is allowed only.*Quick/i);
+    assert.match(text, /browser driving.*git history surgery.*environment repair/is);
+  }
+});
+
+test("browser leaves are read-only, capability-aware, and token-safe", async () => {
+  const browser = await source("agents/browser-verify.md");
+  const visual = await source("agents/visual-review.md");
+  const metadata = frontmatter(browser);
+  assert.match(metadata, /ToolSearch/);
+  assert.match(metadata, /mcp__chrome-devtools__/);
+  assert.doesNotMatch(metadata, /\b(?:Edit|Write|NotebookEdit|Agent)\b/);
+  for (const text of [browser, visual]) {
+    assert.match(text, /never read .*console.*network.*wholesale/i);
+    assert.match(text, /filtered output/i);
+    assert.match(text, /token-bearing URLs/i);
+  }
+});
+
+test("projects pin one browser backend", async () => {
+  const conventions = await source("PROJECT-CONVENTIONS.template.md");
+  assert.match(conventions, /Browser MCP backend.*exactly one/i);
 });
 
 test("external machinery lives in the canonical reference, loaded on demand", async () => {

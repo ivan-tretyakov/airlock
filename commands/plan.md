@@ -94,6 +94,8 @@ Use portable host roles such as `orchestrator`, `implementer`, `investigator`, `
 
 Do not bake host-specific model IDs into the canonical workflow. The plan records the selected mapping; gate evidence records the effective runtime, agent, model, and variant that actually ran.
 
+**Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate two guardrails the restricted agent had by construction: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
+
 Parallel tasks must have disjoint `Owns` sets. Serialize shared files, entry points, and project-wide configuration.
 
 ### Explicit external-runtime routes

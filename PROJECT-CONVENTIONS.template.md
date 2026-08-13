@@ -38,6 +38,7 @@ when the main session uses Fable or an earlier Fable leaf was approved.
    validation must be bounded FOREGROUND runs inside the turn>`
 - **Browser and visual verification:** `<MCP/browser availability, startup URL, cited visual spec, screenshot
   home, required desktop/mobile viewports, and whether authenticated state can be shared with subagents>`
+- **Browser MCP backend:** `<pin exactly one backend and record whether the host exposes it to restricted subagents>`
 - **Temporary artifact home:** `<approved task-owned scratch directory; exact-path cleanup only>`
 - **Retained evidence home:** `<stable screenshots/logs/traces directory and naming/reference convention>`
 - **Cleanup policy:** `<process stop command, retained-vs-temporary rules, and paths/state that must never be cleaned>`
