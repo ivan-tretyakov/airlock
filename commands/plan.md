@@ -24,12 +24,12 @@ Explicit risk decisions still apply at every size; ceremony should not outweigh 
 
 ## Write the self-contained plan
 
-Write to the project’s plans directory (default `docs/plans/YYYY-MM-DD-<topic>.md`). A fresh session must be able to execute it alone. Include:
+Write new Full plans to the canonical project plans directory (default `docs/airlock/plans/YYYY-MM-DD-<topic>.md`). Use `docs/airlock/ledger/YYYY-MM-DD-<topic>.md` for the new ledger and `docs/airlock/specs/` for its design; existing artifacts at legacy `docs/plans/`, `docs/ledger/`, and `docs/specs/` paths remain readable. A fresh session must be able to execute the plan alone. Include:
 
 1. **Goal and architecture** — what done means and which project invariants are involved.
 2. **File contract:**
    - **Owns** — exact files/globs this work may create or modify.
-   - **Process artifacts** — exact design, plan, and ledger paths, owned only by the orchestrator.
+   - **Process artifacts** — exact `docs/airlock/specs/`, `docs/airlock/plans/`, `docs/airlock/ledger/`, and `docs/airlock/STATUS.md` paths, owned only by the orchestrator.
    - **Candidate-bearing paths** — substantive code, tests, configuration, generated artifacts, and cited specs whose changes stale affected final evidence. Exclude only ledger bookkeeping and purely administrative plan progress.
    - **Must NOT touch** — load-bearing paths and other lanes’ files.
    - **STOP-and-handoff** — surface a needed unowned path; never edit it without approval.
@@ -54,6 +54,8 @@ Keep checkbox tasks small (typically 2–15 minutes). For behavior changes, foll
 
 The ledger is the only durable resume store. While work has an active pack, the orchestrator owns exactly one `## Resume checkpoint` section in the ledger. Replace its contents in place; never append checkpoint snapshots or create a parallel checkpoint file, message log, or state system.
 
+Maintain `docs/airlock/STATUS.md` from `${CLAUDE_PLUGIN_ROOT}/references/STATUS.template.md` as the replace-in-place human dashboard. It links the design, plan, and ledger but never replaces the ledger Resume checkpoint as machine resume state.
+
 Keep the checkpoint bounded to these fields:
 
 - **State:** `active` or `closed`.
@@ -71,13 +73,15 @@ Refresh it after every subagent return, gate result, human checkpoint, and scope
 
 At pack acceptance, replace the checkpoint once more, set **State** to `closed`, and identify the final Crossing; do not delete it. A Light single-Crossing pack may initialize and close the same compact checkpoint in one session. A legacy ledger without this section remains valid; add it only when work is actively resumed or repaired, without retrofitting historical state.
 
+Refresh STATUS at package acceptance, review-round close, before compaction, and before ending an unfinished session. Replace it in place, never append snapshots, and retain only the five newest Recently closed rows.
+
 ## Portable execution and host routing
 
-Record the route per pack/task; do not make one global “all inline” or “all subagents” choice.
+Full implementation routes are subagent-only. Record the route per pack/task; do not make one global agent choice for the whole plan.
 
 | Pack / Crossing / task | Work class | Host role | Mode | Why | Parallel group | Checkpoint | Owns |
 |---|---|---|---|---|---|---|---|
-| `<IDs>` | Standard | implementer | inline/subagent | `<one clause>` | A | yes/no | `<exact paths>` |
+| `<IDs>` | Standard | implementer | subagent | `<one clause>` | A | yes/no | `<exact paths>` |
 
 Portable work classes describe risk and judgment, not a vendor model:
 
@@ -90,11 +94,13 @@ Use portable host roles such as `orchestrator`, `implementer`, `investigator`, `
 
 | Host role / work class | Selected host agent or runtime | Selected available model | Independence / rationale |
 |---|---|---|---|
-| `<role> / <class>` | `<configured agent, subagent, or inline>` | `<host-selected model>` | `<why; note any independence limitation>` |
+| `<role> / <class>` | `<configured subagent or external runtime>` | `<host-selected model>` | `<why; note any independence limitation>` |
 
 Do not bake host-specific model IDs into the canonical workflow. The plan records the selected mapping; gate evidence records the effective runtime, agent, model, and variant that actually ran.
 
-Parallel tasks must have disjoint `Owns` sets. Serialize shared files, entry points, and project-wide configuration.
+**Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate every permanent browser guardrail: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`; never access credentials, tokens, cookies, local storage, or browser profiles; request console and network evidence only through filtered output; and never echo token-bearing URLs. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
+
+Parallel read-only tasks may run concurrently when useful. Serialize all file-writing workers while the session-global v2 contract is active, even when `Owns` sets are disjoint; parallel writers require per-worker contracts that do not yet exist. Continue to serialize shared files, entry points, and project-wide configuration.
 
 ### Explicit external-runtime routes
 
@@ -128,7 +134,7 @@ Each final gate will record either a full commit/tree or `base SHA + staged prod
 
 ## Per-pack approval before execution
 
-When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use the host’s structured question tool when available and give a recommendation. One pack may mix inline and subagent tasks. Do not ask for a global inline/subagent choice, and do not execute a pack until its row, routing, and gates are approved.
+When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use `AskUserQuestion` and give a recommendation; if the tool is unavailable, emit BLOCKED. Do not ask for a global agent choice, and do not execute a pack until its row, routing, and gates are approved.
 
 A Light, single-Crossing pack may use one compact route row and only its genuinely required gates.
 
@@ -146,7 +152,18 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 
 Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the base-rules return contract. Every worker is a leaf: do not give it `Agent`, `Task`, workflow, or external-delegation tools. Never route a leaf to Fable without fresh user approval immediately before that individual dispatch; record the approval in the dispatch prompt.
 
-When the host supports hooks, additionally write the contract to `.airlock/contract.json` as `{"schema": "airlock.contract/v1", "ownedPaths": ["<exact path or glob>", ...]}` before the worker runs and delete it after the return audit. While it exists, the plugin's guard hook denies writes outside `ownedPaths` and broad `git add` for every actor in the session, turning the prose contract into deterministic enforcement.
+When the host supports hooks, additionally write the canonical v2 contract to `.airlock/contract.json` before the worker runs:
+
+    {
+      "schema": "airlock.contract/v2",
+      "root": "C:/work/product",
+      "ownedPaths": ["src/**", "D:/shared/tests/**"],
+      "processPaths": ["C:/work/project-docs/docs/airlock/**"],
+      "expiresAt": "<ISO-8601 UTC timestamp no more than 2 hours after dispatch>",
+      "allowDispatch": false
+    }
+
+Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and an ISO-8601 UTC expiry no more than 2 hours after dispatch. Keep `allowDispatch` false for a leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only read-only workers, and delete the contract after the return audit.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
 
@@ -154,8 +171,12 @@ For a launcher-sealed external writer route, follow `references/EXTERNAL-RUNTIME
 
 ## Implement
 
-Activate one approved Delivery Pack and work its contiguous Crossings in order. Tasks may run in parallel only under disjoint ownership. Keep required per-Crossing checks green, turn diagnosed bugs into regression tests, and stop at planned checkpoints.
+Activate one approved Delivery Pack and work its contiguous Crossings in order. Only read-only tasks may run in parallel while the session-global v2 contract exists; serialize all file-writing workers. Keep required per-Crossing checks green, turn diagnosed bugs into regression tests, and stop at planned checkpoints.
 
 Invoke **`ship`** at every Crossing. The final Crossing can accept the Delivery Pack only when all unwaived required gates have fresh evidence for its exact candidate. Feedback after a shipped commit goes through **`review`**.
 
 If the input is a legacy 1.1 ledger, view its historical Crossings as one implicit `legacy:<work-id>` Delivery Pack and leave historical gates unknown. Plan new work as a 1.2 pack; do not retrofit gate evidence or checkpoint history.
+
+## Approval message
+
+For each approval, use `AskUserQuestion` with concrete options and a recommendation in no more than three sentences of rationale. Link the existing written plan and its work-package table instead of streaming detail; the base interaction contract governs the rest of the user-facing message.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -16,6 +17,7 @@ const leafAgents = [
   "verify.md",
   "review.md",
   "visual-review.md",
+  "browser-verify.md",
 ];
 
 async function source(relativePath) {
@@ -93,6 +95,58 @@ test("start.md carries the canonical base rules other commands reference", async
   }
 });
 
+test("browser-role fallback is codified for hosts that defer MCP tools", async () => {
+  const plan = await source("commands/plan.md");
+  assert.match(plan, /Browser-role fallback/);
+  assert.match(plan, /forced substitution, not a preference/i);
+  assert.match(plan, /never access.*credentials.*tokens.*cookies.*local storage.*browser profiles/is);
+  assert.match(plan, /console and network.*filtered/i);
+  assert.match(plan, /never echo token-bearing URLs/i);
+  assert.match(plan, /no edit, stage, or commit during gate execution/i);
+  assert.match(plan, /must not invoke `Agent` or `Task`/);
+  assert.match(plan, /blocked`?, never simulated/i);
+  const visualReview = await source("agents/visual-review.md");
+  assert.match(visualReview, /STOP immediately and report the exact capability gap/i);
+  assert.match(visualReview, /never simulate, infer, or fabricate/i);
+});
+
+test("orchestrator delegation is host-compatible and never absorbs unavailable work", async () => {
+  const [orchestrator, start] = await Promise.all([
+    source("agents/orchestrator.md"),
+    source("commands/start.md"),
+  ]);
+  assert.match(frontmatter(orchestrator), /^\s*- "Agent"$/m);
+  assert.match(frontmatter(orchestrator), /^\s*- AskUserQuestion$/m);
+  assert.doesNotMatch(frontmatter(orchestrator), /Agent\(/);
+  for (const text of [orchestrator, start]) {
+    assert.match(text, /delegation.*unavailable.*STOP/i);
+    assert.match(text, /never authorizes inline implementation/i);
+    assert.match(text, /inline execution is allowed only.*Quick/i);
+    assert.match(text, /browser driving.*git history surgery.*environment repair/is);
+  }
+});
+
+test("browser leaves are read-only, capability-aware, and token-safe", async () => {
+  const browser = await source("agents/browser-verify.md");
+  const visual = await source("agents/visual-review.md");
+  const metadata = frontmatter(browser);
+  assert.match(metadata, /ToolSearch/);
+  assert.match(metadata, /mcp__chrome-devtools__/);
+  assert.doesNotMatch(metadata, /\b(?:Edit|Write|NotebookEdit|Agent)\b/);
+  assert.match(browser, /if the required browser backend is unavailable, STOP and report the exact capability gap/i);
+  assert.match(browser, /must not invoke `Agent` or `Task`/i);
+  for (const text of [browser, visual]) {
+    assert.match(text, /never read .*console.*network.*wholesale/i);
+    assert.match(text, /filtered output/i);
+    assert.match(text, /token-bearing URLs/i);
+  }
+});
+
+test("projects pin one browser backend", async () => {
+  const conventions = await source("PROJECT-CONVENTIONS.template.md");
+  assert.match(conventions, /Browser MCP backend.*exactly one/i);
+});
+
 test("external machinery lives in the canonical reference, loaded on demand", async () => {
   const reference = await source("references/EXTERNAL-RUNTIME.md");
   assert.match(reference, /airlock\.external-agent\/v2/);
@@ -121,12 +175,30 @@ test("external machinery lives in the canonical reference, loaded on demand", as
 test("guard hook is registered, gated on the dispatch contract, and fail-open", async () => {
   const hooks = JSON.parse(await source("hooks/hooks.json"));
   const preToolUse = hooks.hooks.PreToolUse;
-  assert.ok(Array.isArray(preToolUse) && preToolUse.length >= 2);
+  assert.ok(Array.isArray(preToolUse));
+  assert.deepEqual(
+    preToolUse.map((entry) => entry.matcher),
+    ["Bash|PowerShell", "Edit|Write|NotebookEdit|Agent|Task"],
+  );
   for (const entry of preToolUse) {
-    assert.match(entry.hooks[0].command, /guard\.mjs/);
+    assert.equal(entry.hooks.length, 1);
+    assert.equal(entry.hooks[0].type, "command");
+    assert.equal(
+      entry.hooks[0].command,
+      'node "${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs"',
+    );
   }
+  assert.ok(
+    preToolUse.some((entry) => /Agent/.test(entry.matcher) && /Task/.test(entry.matcher)),
+    "Agent and Task calls must reach the guard",
+  );
+  assert.ok(
+    preToolUse.some((entry) => /Bash/.test(entry.matcher) && /PowerShell/.test(entry.matcher)),
+    "Bash and PowerShell calls must reach the guard",
+  );
   const guard = await source("hooks/guard.mjs");
   assert.match(guard, /airlock\.contract\/v1/);
+  assert.match(guard, /airlock\.contract\/v2/);
   assert.match(guard, /Fail-open by design/i);
   const retiredAgent = path.join(agentsDirectory, "external-runner.md");
   let retiredExists = true;
@@ -136,6 +208,38 @@ test("guard hook is registered, gated on the dispatch contract, and fail-open", 
     retiredExists = error.code !== "ENOENT";
   }
   assert.equal(retiredExists, false, "external-runner tombstone must stay deleted");
+});
+
+test("contract v2 is canonical while v1 remains compatible", async () => {
+  const [start, plan, orchestrator, readme] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("agents/orchestrator.md"),
+    source("README.md"),
+  ]);
+  for (const [filename, text] of [
+    ["commands/start.md", start],
+    ["commands/plan.md", plan],
+    ["agents/orchestrator.md", orchestrator],
+    ["README.md", readme],
+  ]) {
+    assert.match(text, /airlock\.contract\/v2/, filename + " must name v2 as canonical");
+  }
+  assert.match(readme, /v1 remains supported/i);
+  assert.match(readme, /common.*writes/i);
+  assert.match(readme, /not hostile-process containment/i);
+  assert.match(plan, /ISO-8601 UTC timestamp no more than 2 hours after dispatch/i);
+  assert.doesNotMatch(plan, /2030-01-01T00:00:00\.000Z/);
+  for (const [filename, text] of [
+    ["commands/start.md", start],
+    ["commands/plan.md", plan],
+    ["agents/orchestrator.md", orchestrator],
+    ["README.md", readme],
+  ]) {
+    assert.match(text, /top-level.*only.*processPaths.*\.airlock/is, filename + ": orchestrator scope");
+    assert.match(text, /(?:subagent|leaf|worker).*only.*ownedPaths/is, filename + ": worker scope");
+    assert.match(text, /serialize all file-writing workers/i, filename + ": writer serialization");
+  }
 });
 
 test("native workers are non-Fable leaves without delegation tools", async () => {
@@ -188,8 +292,152 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.1.0");
+  assert.equal(plugin.version, "2.2.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
+});
+
+function assertInteractionContract(text, filename) {
+  assert.match(text, /exactly one of three forms/i, `${filename}: three forms`);
+  assert.match(text, /PROGRESS.*one line/is, `${filename}: progress is one line`);
+  assert.match(text, /DECISION.*AskUserQuestion.*concrete options.*recommendation/is, `${filename}: decisions are structured`);
+  assert.match(text, /BLOCKED.*at most three lines/is, `${filename}: blocked is bounded`);
+  assert.match(text, /status only at work-?package or review-round boundaries/is, `${filename}: status boundary`);
+  assert.match(text, /Item \| State \| Next \| Owner/, `${filename}: boundary table`);
+  assert.match(text, /about fifteen lines/i, `${filename}: message cap`);
+  assert.match(text, /final success.*PROGRESS/is, `${filename}: final success form`);
+  assert.match(text, /boundary.*explicit exception.*one-line PROGRESS/is, `${filename}: boundary exception`);
+  assert.match(text, /logs.*never user-facing.*stable (?:artifact|link)/is, `${filename}: stable detail link`);
+  assert.match(text, /internal audit reasoning.*never shown/is, `${filename}: audit privacy`);
+  assert.match(text, /plain language/i, `${filename}: plain language`);
+}
+
+test("Airlock main routes share the complete interaction contract", async () => {
+  const [start, orchestrator] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+  ]);
+  assertInteractionContract(start, "commands/start.md");
+  assertInteractionContract(orchestrator, "agents/orchestrator.md");
+  assert.doesNotMatch(start, /Return contract for every workflow and worker/i);
+  assert.doesNotMatch(start, /^### Interaction contract$/m);
+  assert.doesNotMatch(orchestrator, /Return only the outcome and actual verification/i);
+});
+
+function markdownSection(markdown, heading) {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = markdown.match(new RegExp(`^## ${escapedHeading}\\r?\\n([\\s\\S]*?)(?=^#{1,2} |(?![\\s\\S]))`, "m"));
+  assert.ok(match, `missing section: ${heading}`);
+  return match[0];
+}
+
+test("approval checkpoints link their detailed work-package artifacts", async () => {
+  const [brainstorm, plan] = await Promise.all([
+    source("commands/brainstorm.md"),
+    source("commands/plan.md"),
+  ]);
+  const brainstormCheckpoint = markdownSection(brainstorm, "Approval message");
+  const planCheckpoint = markdownSection(plan, "Approval message");
+  assert.match(brainstormCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*proposed\/unapproved specification.*work-package table/is);
+  assert.match(planCheckpoint, /AskUserQuestion.*concrete options.*recommendation.*no more than three sentences.*Link.*written plan.*work-package table/is);
+  assert.match(brainstorm, /write.*proposed\/unapproved specification.*before approval/is);
+});
+
+test("Full and Compact implementation routes are subagent-only", async () => {
+  const [start, orchestrator, plan, brainstorm] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+    source("commands/plan.md"),
+    source("commands/brainstorm.md"),
+  ]);
+  assert.match(start, /\| Compact .*one leaf worker/i);
+  assert.match(orchestrator, /\*\*Compact\*\*.*one leaf worker/i);
+  assert.match(plan, /Full implementation routes are subagent-only/i);
+  assert.doesNotMatch(plan, /\|\s*<IDs>\s*\|[^\r\n]*\|\s*inline(?:\/subagent)?\s*\|/i);
+  assert.doesNotMatch(plan, /mix inline and subagent tasks/i);
+  assert.match(brainstorm, /reclassify.*\/airlock:start.*Quick.*before.*inline/is);
+  assert.doesNotMatch(brainstorm, /implement directly only if genuinely trivial/i);
+});
+
+test("review triage approval is an explicit structured checkpoint", async () => {
+  const review = await source("commands/review.md");
+  assert.match(review, /AskUserQuestion.*triage checkpoint/is);
+});
+
+test("Full work has one current dashboard and an archive lifecycle", async () => {
+  const [start, plan, ship, review, status] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("commands/ship.md"),
+    source("commands/review.md"),
+    source("references/STATUS.template.md"),
+  ]);
+  for (const text of [start, plan, ship, review]) assert.match(text, /docs\/airlock\/STATUS\.md/);
+  assert.match(plan, /docs\/airlock\/(?:ledger|plans|specs)/);
+  assert.match(ship, /archive\/YYYY-MM/);
+  assert.match(ship, /all work packages.*accepted/is);
+  assert.match(status, /Open work packages/);
+  assert.match(status, /Open items/);
+  assert.match(status, /Recently closed/);
+  assert.match(status, /last five/i);
+  const tables = status.match(/^\|[^\r\n]+\|\r?\n\|(?:---\|)+\r?$/gm) ?? [];
+  assert.equal(tables.length, 3, "STATUS template must contain exactly three Markdown tables");
+  assert.match(status, /\[design\]\(<spec-path>\).*\[plan\]\(<plan-path>\).*\[ledger\]\(<ledger-path>\)/);
+  assert.match(status, /Age \(rounds\)/);
+  assert.doesNotMatch(status, /^## (?:TODOs?|Bugs?)\b/im);
+});
+
+test("MUST_FIX items age and require explicit deferral", async () => {
+  const [review, ledger] = await Promise.all([
+    source("commands/review.md"), source("references/LEDGER.template.md"),
+  ]);
+  assert.match(ledger, /Age \(rounds\)/);
+  assert.match(review, /MUST_FIX.*first/is);
+  assert.match(review, /dependency.*dispatch/is);
+  assert.match(review, /AskUserQuestion.*deferr/is);
+});
+
+test("SessionStart compact injects one conditional Airlock resume context line", async () => {
+  const hooksText = await source("hooks/hooks.json");
+  const hooks = JSON.parse(hooksText);
+  assert.equal(hooks.hooks.PreCompact, undefined);
+  const entries = hooks.hooks.SessionStart;
+  assert.ok(Array.isArray(entries) && entries.length === 1);
+  assert.equal(entries[0].matcher, "compact");
+  assert.match(entries[0].hooks[0].command, /compact-context\.mjs/);
+
+  const scriptPath = path.join(root, "hooks", "compact-context.mjs");
+  const result = spawnSync(process.execPath, [scriptPath], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  const lines = result.stdout.trimEnd().split(/\r?\n/);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /When Airlock Full work is active/i);
+  assert.match(lines[0], /otherwise ignore/i);
+  assert.match(lines[0], /design.*plan.*ledger Resume checkpoint.*docs\/airlock\/STATUS\.md/i);
+
+  const policySources = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("agents/orchestrator.md"),
+    source("README.md"),
+  ]);
+  assert.doesNotMatch([hooksText, ...policySources].join("\n"), /PreCompact/i);
+});
+
+test("code leaves simplify only their own GREEN changes before return", async () => {
+  for (const filename of ["code-light.md", "code-standard.md", "code-complex.md", "code-critical.md"]) {
+    const text = await source(path.join("agents", filename));
+    assert.match(text, /after GREEN/i, filename);
+    assert.match(text, /simplif/i, filename);
+    assert.match(text, /same owned paths/i, filename);
+    assert.match(text, /tests stay green|rerun.*test/i, filename);
+  }
+});
+
+test("missing runtime configuration is checked silently", async () => {
+  const start = await source("commands/start.md");
+  assert.match(start, /check whether `.airlock\/config\.json` exists before reading/i);
+  assert.match(start, /when absent.*native.*without.*error/is);
 });

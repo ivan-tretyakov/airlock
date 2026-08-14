@@ -8,7 +8,7 @@ Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable com
 
 ## 1. Load the planned boundary
 
-- Read the approved design, plan, ledger, and current Resume checkpoint before acting. The ledger remains the only durable resume store.
+- Read the approved design, plan, ledger, current Resume checkpoint, and `docs/airlock/STATUS.md` before acting. The ledger remains the only durable machine resume store; STATUS is the human view. Existing legacy artifact paths remain readable.
 - Identify the approved Delivery Pack, next Crossing, exact owned paths, candidate-bearing paths, process artifacts, and required checks/gates. Do not combine packs or skip a Crossing ID.
 - Confirm this Crossing leaves a buildable state. A multi-Crossing pack owns rollback at pack level; do not claim each dependent commit remains independently revertible.
 - Pack lifecycle is `planned → active → candidate → accepted`, with `blocked`, `abandoned`, and `reverted` as exceptional terminal outcomes. Review lifecycle is a separate ledger field.
@@ -106,6 +106,10 @@ Give every Crossing a unique ID. Record approved deviations; write `none` only a
 Set that pack’s review lifecycle to `awaiting-review` when accepted and `in-progress` beforehand. For a `review` Crossing, preserve its `resolving` or `cleared` state; review state never rewrites pack acceptance.
 
 After each gate or cleanup result and before any unfinished return, replace the ledger's bounded Resume checkpoint in place with current paths, fresh evidence, artifact/cleanup state, blockers, and exact next action. Do not append snapshots or paste logs. On final acceptance, set checkpoint **State** to `closed` and reference the final Crossing. A missing checkpoint in a legacy ledger does not invalidate its history; add one only when that work is resumed or repaired.
+
+At every package acceptance and before any unfinished session end, replace `docs/airlock/STATUS.md` in place from current ledger state; never append snapshots and keep only the five newest Recently closed rows. Before compaction, refresh both STATUS and the ledger Resume checkpoint.
+
+Archive the defining plan and specification under `docs/airlock/archive/YYYY-MM/` only when all work packages they define are accepted. If any defined package is planned, active, candidate, blocked, abandoned, or reverted, keep that plan/spec active in `docs/airlock/plans/` and `docs/airlock/specs/`.
 
 Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recompute the candidate hash if any candidate-bearing path changed. Process-only ledger staging does not stale evidence. For an external handoff, stage only orchestrator-owned process artifacts in the Crossing commit, keep launcher-sealed product paths clean, and reference the audited launcher candidate SHA/tree.
 

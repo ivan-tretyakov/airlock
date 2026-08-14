@@ -15,8 +15,8 @@ Airlock classifies task complexity separately from workflow weight.
 | Workflow | Intended work | Execution |
 |---|---|---|
 | **Quick** | Trivial or Light | One execution end-to-end: one leaf worker, or the main session inline when the change is small and already in context. No design, plan, ledger, Crossing, or review artifacts. |
-| **Compact** | Standard | Short in-chat scope, normally one leaf worker, and risk-relevant verification. |
-| **Full** | Complex or Critical | Explicit design, plan, ledger, Crossing, and selected evidence gates. Starts at the Full-lite shape (one pack, required gates only) and escalates only when scale demands it. |
+| **Compact** | Standard | Short in-chat scope, exactly one leaf worker for implementation, and risk-relevant verification. |
+| **Full** | Complex or Critical | Subagent-only implementation under explicit design, plan, ledger, Crossing, and selected evidence gates. Starts at the Full-lite shape (one pack, required gates only) and escalates only when scale demands it. |
 
 Ambiguous work escalates one level. Security-sensitive, destructive, migration, production/live, publication, and irreversible work always uses Full.
 
@@ -42,6 +42,12 @@ Override classification when needed:
 | `/airlock:debug` | Reproduce and isolate non-trivial failures. |
 
 The explicit commands live in `commands/`. They are not auto-discovered workflow skills.
+
+## Interaction Contract
+
+Airlock keeps work messages compact and uses exactly three forms: one-line **PROGRESS** with the meaningful state change and next action; structured **DECISION** through `AskUserQuestion` with concrete options and a recommendation; or **BLOCKED** with cause, impact, and one exact next action in at most three lines. Final success is PROGRESS and states outcome plus actual verification. At work-package and review-round boundaries, a compact `Item | State | Next | Owner` table is the explicit exception to one-line PROGRESS.
+
+Design and plan approval is always DECISION. Long logs and internal audit reasoning are never user-facing; when detail is needed, Airlock provides a stable artifact/link.
 
 ## Runtime Setup
 
@@ -70,13 +76,19 @@ Runtime resolution is:
 - Default leaf agents use Haiku, Sonnet, or Opus aliases, never Fable.
 - Every individual Fable leaf requires fresh user approval, including under a Fable main session.
 
+## Browser Verification
+
+Full plans pin exactly one browser MCP backend in project conventions. The read-only `browser-verify` leaf preflights that backend and authentication before collecting evidence; if the capability is unavailable, Airlock reports the blocker instead of simulating verification or moving the work inline. Browser leaves request only filtered console and network output and never reproduce token-bearing URLs, credentials, cookies, local storage, or browser-profile data.
+
 ## Enforcement Hooks
 
-The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes a dispatch contract to `.airlock/contract.json` (schema `airlock.contract/v1`). While the contract exists, the hook deterministically blocks file writes outside `ownedPaths` and broad staging (`git add -A`, `git add --all`, `git add .`) for every actor in the session, then goes silent again when the contract is deleted after the return audit. The hook is fail-open: a missing or malformed contract never blocks anything.
+The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, and `allowDispatch` (false by default). The initial top-level dispatch is allowed because it omits `agent_id`; a call carrying `agent_id` is a subagent call and is denied unless dispatch is explicitly allowed.
+
+While a valid active v2 contract exists, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. Serialize all file-writing workers while this session-global contract is active; parallelize only read-only workers until per-worker contracts exist. Bash and PowerShell both block broad staging (including unscoped update staging for v2) and obvious out-of-contract redirection or write-cmdlet targets. File and shell targets resolve through their nearest existing ancestor so symlink/junction escapes are denied, and write-bearing compound commands with an unsafe directory change are denied. This common screening of shell writes is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior, including unscoped `git add -u` and `git add --update`. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 
 ## Context Discipline
 
-Command prompts state each rule once: `/airlock:start` carries the base rules (output, delegation, artifacts/cleanup) that the other commands reference, and the entire external-runtime contract — route records, the strict `airlock.external-agent/v2` manifest, dispatch, recovery, and the candidate audit — lives only in `references/EXTERNAL-RUNTIME.md`, loaded on demand for external routes. Native-only sessions never pay for it.
+Command prompts state each rule once: `/airlock:start` carries the base rules (output, delegation, artifacts/cleanup) that the other commands reference, and the entire external-runtime contract — route records, the strict `airlock.external-agent/v2` manifest, dispatch, recovery, and the candidate audit — lives only in `references/EXTERNAL-RUNTIME.md`, loaded on demand for external routes. Native-only sessions never pay for it. After compaction, the `SessionStart` matcher `compact` injects one conditional reminder: active Full work rereads its design, plan, ledger Resume checkpoint, and `docs/airlock/STATUS.md`; other sessions ignore it. Pre-compaction refresh remains a prompt rule.
 
 ## Concise Output
 
@@ -128,7 +140,9 @@ It consumes a hashed `airlock.external-agent/v2` manifest, validates the exact b
 
 Copy the concise block from `PROJECT-CONVENTIONS.template.md` into project instructions. Project instructions should state that Airlock is opt-in, plus only the commands, invariants, validation commands, protected state, artifact homes, and branch policy that can change execution.
 
-The Full workflow ledger template is `references/LEDGER.template.md`.
+New Full workflow artifacts use `docs/airlock/`: the human dashboard is `STATUS.md`, with machine resume state in `ledger/`, active plans in `plans/`, active specifications in `specs/`, and fully accepted plan/spec pairs in `archive/YYYY-MM/`. Legacy `docs/ledger/`, `docs/plans/`, and `docs/specs/` paths remain readable.
+
+Reusable Full workflow templates are `references/STATUS.template.md` and `references/LEDGER.template.md`.
 
 ## Validation
 
@@ -143,3 +157,17 @@ claude plugin validate .claude-plugin/marketplace.json --strict
 ## License
 
 Apache-2.0. See `LICENSE`.
+
+## Plain-language workflow
+
+User messages use plain language while artifacts retain canonical terms for grep-ability.
+
+| User message | Artifact term |
+|---|---|
+| work package | Delivery Pack |
+| checkpoint commit | Crossing |
+| check | gate |
+| exact code being verified | candidate |
+| approved skip | waiver |
+| parallel workstream | lane |
+| test-fix-simplify | RED-GREEN-refactor |

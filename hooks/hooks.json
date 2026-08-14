@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -11,11 +11,22 @@
         ]
       },
       {
-        "matcher": "Edit|Write|NotebookEdit",
+        "matcher": "Edit|Write|NotebookEdit|Agent|Task",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/compact-context.mjs\""
           }
         ]
       }

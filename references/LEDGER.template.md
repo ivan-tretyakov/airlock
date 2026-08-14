@@ -1,14 +1,14 @@
 # Ledger template
 
-The ledger records Delivery Pack lifecycle, what each Crossing committed, exact-candidate gate evidence, and post-ship feedback. One ledger normally matches one plan at `docs/ledger/YYYY-MM-DD-<topic>.md`.
+The ledger is machine resume state and records Delivery Pack lifecycle, what each Crossing committed, exact-candidate gate evidence, and post-ship feedback. One new ledger normally matches one plan at `docs/airlock/ledger/YYYY-MM-DD-<topic>.md`; legacy `docs/ledger/` paths remain readable. `docs/airlock/STATUS.md` is only the human view.
 
 ```markdown
 # Ledger — <topic>
 
 - **Schema:** Airlock 1.2
 - **Work ID:** `<stable topic or issue ID>`
-- **Design:** `docs/specs/YYYY-MM-DD-<topic>-design.md`
-- **Plan:** `docs/plans/YYYY-MM-DD-<topic>.md`
+- **Design:** `docs/airlock/specs/YYYY-MM-DD-<topic>-design.md`
+- **Plan:** `docs/airlock/plans/YYYY-MM-DD-<topic>.md`
 - **Base SHA:** `<full SHA before the work began>`
 - **Branch:** `<branch>`
 - **PR:** `<number or none>`
@@ -95,9 +95,9 @@ One record block per evidence entry; omit the External handoff sub-list entirely
 <!-- Class: MUST_FIX | SHOULD_FIX | PARK | OUT_OF_SCOPE -->
 <!-- State: open | done | parked | rejected -->
 
-| # | Source ID / URL | Class | Pack ID | Crossing ID | Gate ID | Item | State | Repair pack / resolution |
-|---|---|---|---|---|---|---|---|---|
-| 1 | `<prompt, check, issue, or thread URL>` | MUST_FIX | `<pack-id>` | `<crossing-id or —>` | `<gate-id or —>` | `<one line>` | open | |
+| # | Source ID / URL | Class | Age (rounds) | Pack ID | Crossing ID | Gate ID | Item | State | Blocking dependency + dispatch/action | Repair pack / resolution |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `<prompt, check, issue, or thread URL>` | MUST_FIX | 0 | `<pack-id>` | `<crossing-id or —>` | `<gate-id or —>` | `<one line>` | open | `<dependency and dispatch/action, or —>` | |
 
 ## Debug records
 
