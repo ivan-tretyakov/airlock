@@ -15,10 +15,16 @@ Airlock classifies task complexity separately from workflow weight.
 | Workflow | Intended work | Execution |
 |---|---|---|
 | **Quick** | Trivial or Light | One execution end-to-end: one leaf worker, or the main session inline when the change is small and already in context. No design, plan, ledger, Crossing, or review artifacts. |
-| **Compact** | Standard | Short in-chat scope, exactly one leaf worker for implementation, and risk-relevant verification. |
+| **Compact** | Standard | Short in-chat scope, one multipurpose `worker` for investigation + implementation + self-verification, and only risk-relevant independent verification. |
 | **Full** | Complex or Critical | Subagent-only implementation under explicit design, plan, ledger, Crossing, and selected evidence gates. Starts at the Full-lite shape (one pack, required gates only) and escalates only when scale demands it. |
 
-Ambiguous work escalates one level. Security-sensitive, destructive, migration, production/live, publication, and irreversible work always uses Full.
+Ambiguous work escalates one level. Security-sensitive, destructive, migration, production/live, and irreversible work always uses Full.
+
+Dispatch budgets are guidelines: Quick 0-1, Compact 1-2, Full-lite at most 3 per Crossing, and Full as planned. Airlock prefers `worker` over an investigate -> code-* -> verify chain unless a user decision, Critical work, or an independence gate requires specialists.
+
+### Release lane
+
+A release PR merged by the user is Compact by default: version bump, changelog/README, validation, and opening the PR. Publication is the direct mutation users consume - pushing an auto-consumed tag, publishing to a marketplace or registry, or deploying - and that mutating step requires DECISION. After the user merges, tag or publish only behind a second DECISION. Releases involving migrations, credential changes, or irreversible state remain Full.
 
 Override classification when needed:
 
@@ -32,9 +38,9 @@ Override classification when needed:
 
 | Command | Purpose |
 |---|---|
-| `/airlock:start` | Activate Airlock for this session and route a task. |
+| `/airlock:start` | Activate Airlock for this session and route an attended or `--unattended` task. |
 | `/airlock:stop` | Return a command-activated session to normal behavior. |
-| `/airlock:setup native|opencode` | Store the project runtime preference without activating Airlock. |
+| `/airlock:setup [native|opencode]` | Bootstrap runtime, one browser backend/auth state, host config, and selected-harness MCP registration without activating Airlock. |
 | `/airlock:brainstorm` | Approve scope and design for Full work. |
 | `/airlock:plan` | Create Full Delivery Packs, Crossings, routing, and gates. |
 | `/airlock:ship` | Seal one Full Crossing with exact-candidate evidence. |
@@ -51,14 +57,25 @@ Design and plan approval is always DECISION. Long logs and internal audit reason
 
 ## Runtime Setup
 
-`/airlock:setup` writes `.airlock/config.json`:
+`/airlock:setup` is an idempotent interactive bootstrap. It records runtime, selected Claude Code/OpenCode harnesses, host identity, one browser backend, absolute out-of-repo auth path, auth signal, and exact refresh command. It merges rather than overwrites `.mcp.json` and `opencode.json`/`opencode.jsonc`; conflicts stop with a diff.
 
 ```json
 {
-  "schema": "airlock.config/v1",
-  "runtime": "native"
+  "schema": "airlock.config/v2",
+  "runtime": "native",
+  "harnesses": ["claude", "opencode"],
+  "host": { "os": "win32", "machine": "workstation" },
+  "browser": {
+    "backend": "playwright",
+    "appUrl": "https://example.invalid",
+    "authState": "C:/Users/me/.airlock/auth/project/state.json",
+    "authSignal": { "url": "https://example.invalid/account", "selector": "[data-authenticated]" },
+    "refreshCommand": "npx playwright open --save-storage=... https://example.invalid"
+  }
 }
 ```
+
+`airlock.config/v1` files remain valid for runtime-only use; a missing `browser` block means no browser gates are configured. Multi-host projects use `.airlock/config.<hostname>.json` browser overlays so Windows, Linux, and macOS never reuse incompatible commands or auth paths.
 
 Runtime resolution is:
 
@@ -75,14 +92,15 @@ Runtime resolution is:
 - OpenCode runs require `subagent_depth: 0` and deny `task` and interactive questions.
 - Default leaf agents use Haiku, Sonnet, or Opus aliases, never Fable.
 - Every individual Fable leaf requires fresh user approval, including under a Fable main session.
+- Compact and low-risk Full work normally uses the all-round `worker`; independent review remains separate.
 
 ## Browser Verification
 
-Full plans pin exactly one browser MCP backend in project conventions. The read-only `browser-verify` leaf preflights that backend and authentication before collecting evidence; if the capability is unavailable, Airlock reports the blocker instead of simulating verification or moving the work inline. Browser leaves request only filtered console and network output and never reproduce token-bearing URLs, credentials, cookies, local storage, or browser-profile data.
+`/airlock:setup` pins exactly one browser backend and registers the same `browser` server and absolute auth state for every selected host harness. Playwright storage state is worktree-independent and parallel-safe; chrome-devtools uses either a persistent profile or a user-approved `browserUrl`. Browser leaves never read auth files. They preflight the backend and auth signal, return BLOCKED with `refreshCommand` verbatim on expiry, request only filtered console/network output, and never reproduce token-bearing URLs, credentials, cookies, local storage, or browser-profile data.
 
 ## Enforcement Hooks
 
-The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, and `allowDispatch` (false by default). The initial top-level dispatch is allowed because it omits `agent_id`; a call carrying `agent_id` is a subagent call and is denied unless dispatch is explicitly allowed.
+The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before every dispatch. Read-only leaves use `ownedPaths: []` and `allowDispatch: false`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, `allowDispatch`, and `actorMode`: `agent-id` (default), `trust-toplevel`, or `single-actor`. The safest fallback on a host that never emits `agent_id` is `single-actor`, which applies worker rules to everyone. README smoke test: write a contract, verify an orchestrator process-path edit and a worker owned-path edit both succeed under `agent-id`; repeat with `single-actor` expecting worker scope only.
 
 While a valid active v2 contract exists, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. Serialize all file-writing workers while this session-global contract is active; parallelize only read-only workers until per-worker contracts exist. Bash and PowerShell both block broad staging (including unscoped update staging for v2) and obvious out-of-contract redirection or write-cmdlet targets. File and shell targets resolve through their nearest existing ancestor so symlink/junction escapes are denied, and write-bearing compound commands with an unsafe directory change are denied. This common screening of shell writes is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior, including unscoped `git add -u` and `git add --update`. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 
@@ -144,6 +162,14 @@ New Full workflow artifacts use `docs/airlock/`: the human dashboard is `STATUS.
 
 Reusable Full workflow templates are `references/STATUS.template.md` and `references/LEDGER.template.md`.
 
+## Unattended mode
+
+`/airlock:start --unattended` (or unavailable `AskUserQuestion`) parks ordinary decisions in `docs/airlock/DECISIONS.md`, marks the affected package `blocked-on-user`, and continues the next unblocked package until the declared Crossing/wall-clock budget. Answer with `decision: <option>` or a clear mirrored PR reply; the next session reads decisions first, records the approval, and unblocks the package.
+
+Design approval, always-Full safety work, merges to main, and publication are hard stops and never auto-proceed. Every unattended run replaces a five-line `## Last unattended run` summary in STATUS.
+
+`DECISIONS.md` means questions waiting for you; `references/DECISIONS.template.md` defines its source-of-truth table.
+
 ## Validation
 
 ```text
@@ -171,3 +197,5 @@ User messages use plain language while artifacts retain canonical terms for grep
 | approved skip | waiver |
 | parallel workstream | lane |
 | test-fix-simplify | RED-GREEN-refactor |
+| all-round builder | worker |
+| questions waiting for you | DECISIONS.md |

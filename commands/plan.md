@@ -10,7 +10,7 @@ Precondition: an approved design or scope contract exists. If not, stop and invo
 
 Most Full work is one coherent outcome. Start every plan at the **Full-lite** shape and escalate only when the work actually demands more:
 
-- **Full-lite** (default): goal and architecture, the file contract, **one** compact Delivery Pack row, the task checklist with Crossing mapping, one compact route row, and only genuinely required gates. Initialize the ledger at the first `ship` rather than up front; a single-Crossing pack may open and close its Resume checkpoint in one session.
+- **Full-lite** (default): goal and architecture, the file contract, **one** compact Delivery Pack row, the task checklist with Crossing mapping, one compact route row, and only genuinely required gates. Prefer one `worker` per Crossing and keep the guideline at no more than three dispatches per Crossing, including required independent gates. Initialize the ledger at the first `ship` rather than up front; a single-Crossing pack may open and close its Resume checkpoint in one session.
 - **Escalate to the full schema** only when the plan has multiple Delivery Packs, parallel lanes with disjoint ownership, an external-runtime route, or work that must span sessions. Add only the sections the escalation actually needs.
 
 Explicit risk decisions still apply at every size; ceremony should not outweigh the work.
@@ -100,7 +100,9 @@ Do not bake host-specific model IDs into the canonical workflow. The plan record
 
 **Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate every permanent browser guardrail: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`; never access credentials, tokens, cookies, local storage, or browser profiles; request console and network evidence only through filtered output; and never echo token-bearing URLs. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
 
-Parallel read-only tasks may run concurrently when useful. Serialize all file-writing workers while the session-global v2 contract is active, even when `Owns` sets are disjoint; parallel writers require per-worker contracts that do not yet exist. Continue to serialize shared files, entry points, and project-wide configuration.
+Prefer `worker` over an investigate -> code-* -> verify sequence unless the investigation output is a user decision input, the work is Critical, or a gate requires independence. Use specialist leaves for those exceptions. If a route exceeds its dispatch budget, require one PROGRESS line with the reason.
+
+Parallel read-only tasks may run concurrently when useful. Serialize all file-writing workers while the session-global v2 contract is active, even when `Owns` sets are disjoint. Named per-worker contracts (`.airlock/contracts/<worker-id>.json`) are a 2.4 design note only and are not implemented here. Continue to serialize shared files, entry points, and project-wide configuration.
 
 ### Explicit external-runtime routes
 
@@ -134,13 +136,13 @@ Each final gate will record either a full commit/tree or `base SHA + staged prod
 
 ## Per-pack approval before execution
 
-When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use `AskUserQuestion` and give a recommendation; if the tool is unavailable, emit BLOCKED. Do not ask for a global agent choice, and do not execute a pack until its row, routing, and gates are approved.
+When the plan is written, stop and ask the user to approve or amend **each Delivery Pack’s** outcome, Crossing split, route, and gates. Use `AskUserQuestion` and give a recommendation. If the tool is unavailable, enter unattended mode: park the affected pack approval in `docs/airlock/DECISIONS.md`, mark that pack `blocked-on-user`, and continue planning other unblocked packs. Do not ask for a global agent choice, and do not execute a pack until its row, routing, and gates are approved.
 
 A Light, single-Crossing pack may use one compact route row and only its genuinely required gates.
 
 ## Dispatch protocol
 
-Before any file-writing subagent, confirm the approved scope. Restate this contract **verbatim** in every fresh-context prompt:
+Before every dispatch, including a read-only subagent, confirm the approved scope. Restate this contract **verbatim** in every fresh-context prompt:
 
 > **You may create or modify ONLY:** `<exact paths>`
 >
@@ -152,10 +154,11 @@ Before any file-writing subagent, confirm the approved scope. Restate this contr
 
 Also include the task’s Pack/Crossing IDs, host role, RED/GREEN steps, bounded validation, evidence expected, and the base-rules return contract. Every worker is a leaf: do not give it `Agent`, `Task`, workflow, or external-delegation tools. Never route a leaf to Fable without fresh user approval immediately before that individual dispatch; record the approval in the dispatch prompt.
 
-When the host supports hooks, additionally write the canonical v2 contract to `.airlock/contract.json` before the worker runs:
+When the host supports hooks, additionally write the canonical v2 contract to `.airlock/contract.json` before every dispatch:
 
     {
       "schema": "airlock.contract/v2",
+      "actorMode": "agent-id",
       "root": "C:/work/product",
       "ownedPaths": ["src/**", "D:/shared/tests/**"],
       "processPaths": ["C:/work/project-docs/docs/airlock/**"],
@@ -163,7 +166,7 @@ When the host supports hooks, additionally write the canonical v2 contract to `.
       "allowDispatch": false
     }
 
-Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and an ISO-8601 UTC expiry no more than 2 hours after dispatch. Keep `allowDispatch` false for a leaf. The initial top-level `Agent`/`Task` call is allowed because it omits `agent_id`; a call carrying `agent_id` is denied unless `allowDispatch: true`. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only read-only workers, and delete the contract after the return audit.
+Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and an ISO-8601 UTC expiry no more than 2 hours after dispatch (for example, now + 2h). Keep `allowDispatch` false for a leaf. A read-only dispatch uses the minimal contract `ownedPaths: []` and `allowDispatch: false`. `actorMode` defaults to `agent-id`; if the session has never observed an `agent_id`-bearing hook input, explicitly select `single-actor` (worker rules apply to everyone) or `trust-toplevel` only for a no-worker-write compatibility route. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; worker calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only workers whose minimal read-only contracts are identical, and delete the contract after the return audit.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
 

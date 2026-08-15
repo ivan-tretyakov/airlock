@@ -346,6 +346,8 @@ test("v2 allows top-level dispatch and denies nested dispatch unless explicitly 
   await writeContract(root, {
     schema: "airlock.contract/v2",
     ownedPaths: [],
+    processPaths: ["docs/airlock/**"],
+    allowDispatch: false,
   });
   for (const tool_name of ["Agent", "Task"]) {
     assert.equal(
@@ -359,6 +361,13 @@ test("v2 allows top-level dispatch and denies nested dispatch unless explicitly 
       "nested " + tool_name,
     );
   }
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(root, "src", "read-only.txt") },
+    cwd: root,
+    agent_id: "worker-1",
+  }).decision, "deny", "minimal read-only contract owns no product paths");
+
   await writeContract(root, {
     schema: "airlock.contract/v2",
     ownedPaths: [],
@@ -640,4 +649,105 @@ test("v2 treats relative root as malformed and fails open", async (t) => {
     tool_input: { file_path: path.join(root, "package.json") },
     cwd: root,
   }).decision, "allow");
+});
+
+test("v2 actorMode supports explicit degraded-host fallbacks", async (t) => {
+  const root = await makeProject(t);
+  const owned = path.join(root, "src", "feature.ts");
+  const processDocument = path.join(root, "docs", "airlock", "STATUS.md");
+
+  await writeContract(root, {
+    schema: "airlock.contract/v2",
+    actorMode: "single-actor",
+    ownedPaths: ["src/**"],
+    processPaths: ["docs/airlock/STATUS.md"],
+  });
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: owned },
+    cwd: root,
+  }).decision, "allow", "single-actor applies worker scope without agent_id");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: processDocument },
+    cwd: root,
+  }).decision, "deny", "single-actor never grants process scope");
+  assert.equal(runGuard({
+    tool_name: "Agent",
+    tool_input: {},
+    cwd: root,
+  }).decision, "deny", "single-actor remains a leaf");
+
+  await writeContract(root, {
+    schema: "airlock.contract/v2",
+    actorMode: "trust-toplevel",
+    ownedPaths: ["src/**"],
+    processPaths: ["docs/airlock/STATUS.md"],
+  });
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: processDocument },
+    cwd: root,
+    agent_id: "field-is-untrusted",
+  }).decision, "allow", "trust-toplevel applies top-level scope");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: owned },
+    cwd: root,
+    agent_id: "field-is-untrusted",
+  }).decision, "deny", "trust-toplevel never grants worker scope");
+});
+
+test("v2 rejects unknown actorMode values", async (t) => {
+  const root = await makeProject(t);
+  await writeContract(root, {
+    schema: "airlock.contract/v2",
+    actorMode: "guess",
+    ownedPaths: [],
+  });
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(root, "package.json") },
+    cwd: root,
+  }).decision, "allow");
+});
+
+test("browser config v2 never activates the dispatch guard", async (t) => {
+  const root = await makeProject(t);
+  await mkdir(path.join(root, ".airlock"), { recursive: true });
+  await writeFile(path.join(root, ".airlock", "config.json"), JSON.stringify({
+    schema: "airlock.config/v2",
+    runtime: "native",
+    harnesses: ["claude", "opencode"],
+    host: { os: process.platform, machine: "test-host" },
+    browser: {
+      backend: "playwright",
+      authState: path.join(root, "outside-repo-state.json"),
+    },
+  }));
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(root, "package.json") },
+    cwd: root,
+  }).decision, "allow");
+});
+
+test("v2 treats Darwin paths case-insensitively through a non-existing suffix", async (t) => {
+  const root = await makeProject(t);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  const preloadPath = path.join(root, "force-darwin.mjs");
+  await writeFile(
+    preloadPath,
+    'Object.defineProperty(process, "platform", { value: "darwin" });\n',
+  );
+  await writeContract(root, {
+    schema: "airlock.contract/v2",
+    ownedPaths: ["src/Future/Output.txt"],
+  });
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: { file_path: path.join(root, "src", "future", "output.txt") },
+    cwd: root,
+    agent_id: "worker-1",
+  }, { importPath: preloadPath }).decision, "allow");
 });

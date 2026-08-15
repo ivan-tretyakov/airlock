@@ -1,7 +1,7 @@
 {
   "name": "airlock",
   "description": "Opt-in adaptive development orchestration: one leaf for Quick work, compact handling for Standard work, and evidence-gated Full delivery when risk requires it.",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": {
     "name": "Ivan Tretyakov"
   },

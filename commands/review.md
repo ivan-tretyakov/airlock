@@ -6,6 +6,12 @@ description: Review explicit Full Airlock work
 
 The Airlock base rules (Output, Delegation, Artifacts and cleanup) from `/airlock:start` or the orchestrator agent apply throughout. Make post-ship feedback an artifact, not a conversation. This workflow is **not** the pre-ship independent-review gate: that gate helps accept a candidate; Airlock `review` handles feedback after a Crossing has shipped.
 
+Before loading other state, read `docs/airlock/DECISIONS.md` first when it exists. For every open row with `decision: <option>` or a clear mirrored PR reply, set the row `answered`, record the approval in the ledger, and unblock the affected package.
+
+When `--unattended` is active or `AskUserQuestion` is unavailable, park a triage or deferral decision instead of blocking the whole run: append the seven-column decision row from `references/DECISIONS.template.md`, mark the affected review/repair package `blocked-on-user` in STATUS, and continue with the next unblocked package. Mirror numbered options to a PR comment when available, but DECISIONS.md is authoritative.
+
+Never auto-proceed through design approval for new scope, always-Full safety work, a merge to main, or publication. Park the hard stop and end that affected lane.
+
 ## 1. Load pack-aware state
 
 Identify the ledger from the topic, plan, Work ID, Delivery Pack ID, Crossing ID, gate ID, or review surface. If more than one could apply, ask rather than guess. Read the approved design, plan, ledger, bounded Resume checkpoint, and `docs/airlock/STATUS.md` before acting; legacy artifact paths remain readable. Then reconcile with:
@@ -38,7 +44,7 @@ Collect all available feedback and classify each item:
 
 For every item, propose links to the affected **Delivery Pack**, optional **Crossing**, and optional **gate**. Use `—` only when the source genuinely applies to the pack as a whole. Preserve stable source IDs/URLs for deduplication.
 
-Present numbered triage and stop for user approval before editing implementation or persisting feedback rows. Before that human checkpoint, replace only the orchestrator-owned Resume checkpoint when the ledger is owned; record the exact approval needed and next action without treating proposed triage as approved history. After approval, persist rows with those links and refresh the checkpoint in place.
+Present numbered triage and stop for user approval before editing implementation or persisting feedback rows. In attended mode use `AskUserQuestion`; in unattended mode use the decision-parking rule above. Before that checkpoint, replace only the orchestrator-owned Resume checkpoint when the ledger is owned; record the exact approval needed and next action without treating proposed triage as approved history. After approval, persist rows with those links and refresh the checkpoint in place.
 
 At the start of each review round, increment `Age (rounds)` for every still-open MUST_FIX item and list all open MUST_FIX items first. A blocked row must name both the dependency and the dispatch/action that unblocks it.
 
@@ -89,4 +95,4 @@ Lead with findings, ordered by severity. Include resolved, rejected, parked, rep
 
 Next skill: **`ship`**.
 
-Use `AskUserQuestion` for this triage checkpoint; do not make the structured decision optional.
+Use `AskUserQuestion` for this attended triage checkpoint; do not make the structured decision optional. When unavailable, activate unattended parking rather than asking in prose.
