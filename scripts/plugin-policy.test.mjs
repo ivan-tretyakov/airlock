@@ -507,12 +507,17 @@ test("setup v2 bootstraps one shared browser backend across selected harnesses a
   assert.match(setup, /--user-data-dir.*--browserUrl/is);
   assert.match(setup, /native Windows.*"cmd".*"\/c".*"npx"/is);
   assert.match(setup, /OpenCode.*`npx\.cmd`/is);
+  assert.match(setup, /@playwright\/mcp@latest/);
+  assert.match(setup, /chrome-devtools-mcp@latest/);
+  assert.match(setup, /exact.*launch.*(?:command|argv).*config/is);
+  assert.match(setup, /Playwright.*state file.*chrome-devtools.*profile.*browserUrl/is);
   assert.match(setup, /re-run \/airlock:setup on this host/i);
   assert.match(setup, /state file.*never.*ownedPaths.*processPaths/is);
   assert.match(setup, /one-line human login command.*wait.*state file exists/is);
   assert.match(setup, /backend reachable.*auth signal/is);
   assert.match(start, /browser gate.*preflight.*refreshCommand/is);
   assert.match(readme, /airlock\.config\/v1.*remain.*valid/is);
+  assert.match(readme, /exact.*backend launch command/is);
   assert.match(openCodeSetup, /browser.*bootstrap/i);
 });
 
@@ -549,6 +554,10 @@ test("unattended mode parks decisions, resumes answers, and stops at hard gates 
   assert.match(decisions, /Status.*open/i);
   assert.match(status, /## Last unattended run/);
   assert.match(readme, /DECISIONS\.md.*questions waiting for you/i);
+  assert.match(
+    review,
+    /Before any unrelated implementation.*In attended mode, use `AskUserQuestion`; in unattended mode, park the deferral decision/is,
+  );
 });
 
 test("every dispatch gets a minimal non-delegating contract", async () => {

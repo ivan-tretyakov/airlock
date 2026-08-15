@@ -24,11 +24,18 @@ Build a project slug from the repository name. Authentication lives outside the 
 
 Use `state.json` as Playwright `authState`; use the sibling `profile/` directory for chrome-devtools persistent-profile mode. Resolve and store absolute paths. The agent never reads or prints a state file, and the browser process loads it. The state file and profile are never added to `ownedPaths` or `processPaths`. Check `.gitignore` and warn if any resolved auth path is inside the repository; do not silently normalize an unsafe location.
 
-Print the one-line human login command, wait for the user to run it, and verify the state file exists before auth preflight. Emit a PowerShell-pasteable `refreshCommand` on Windows and a bash-pasteable command on Linux/macOS.
+Print the one-line human login command and wait for the user to run it. For Playwright, verify the state file exists before auth preflight. For chrome-devtools persistent-profile mode, verify the profile directory exists; for `browserUrl` mode, verify the configured endpoint is reachable. Emit a PowerShell-pasteable `refreshCommand` on Windows and a bash-pasteable command on Linux/macOS.
 
 ## 3. Register one browser server
 
 Use the same server name `browser`, backend, flags, absolute auth path, and viewport for every selected harness.
+
+Build one exact backend argument vector before writing either registration:
+
+- Playwright uses `@playwright/mcp@latest`; its arguments begin `-y`, `@playwright/mcp@latest`, `--storage-state`, and the absolute `authState`, followed by `--viewport-size` and the approved `<width>x<height>` when configured.
+- chrome-devtools uses `chrome-devtools-mcp@latest`; its arguments begin `-y`, `chrome-devtools-mcp@latest`, followed by exactly one of `--user-data-dir <absolute profile>` or `--browserUrl http://127.0.0.1:9222`, plus `--executablePath <absolute executable>` only when required.
+
+Preserve this exact launch command/argv in config as well as in each harness registration; do not make later prompts reconstruct package names, paths, or flags.
 
 For Playwright, pass `--storage-state <authState>` and the agreed viewport; never `--isolated`, and never rely on the default profile. Storage state creates a fresh parallel-safe context whose cookies are copied for every run.
 
@@ -60,7 +67,11 @@ Write or reconcile `.airlock/config.json`:
     "appUrl": "https://example.invalid",
     "authState": "<absolute path>/state.json",
     "authSignal": { "url": "https://example.invalid/account", "selector": "[data-authenticated]" },
-    "refreshCommand": "npx playwright open --save-storage=<absolute path>/state.json https://example.invalid"
+    "refreshCommand": "npx playwright open --save-storage=<absolute path>/state.json https://example.invalid",
+    "launch": {
+      "claude": { "command": "cmd", "args": ["/c", "npx", "-y", "@playwright/mcp@latest", "--storage-state", "<absolute path>/state.json"], "env": {} },
+      "opencode": { "command": ["npx.cmd", "-y", "@playwright/mcp@latest", "--storage-state", "<absolute path>/state.json"], "environment": {} }
+    }
   }
 }
 ```

@@ -48,7 +48,7 @@ Present numbered triage and stop for user approval before editing implementation
 
 At the start of each review round, increment `Age (rounds)` for every still-open MUST_FIX item and list all open MUST_FIX items first. A blocked row must name both the dependency and the dispatch/action that unblocks it.
 
-Before any unrelated implementation while a MUST_FIX remains open, use `AskUserQuestion` to obtain explicit deferral approval; record the reason and disposition. Without that approval, resolve or dispatch the MUST_FIX first.
+Before any unrelated implementation while a MUST_FIX remains open, obtain explicit deferral approval and record the reason and disposition. In attended mode, use `AskUserQuestion`; in unattended mode, park the deferral decision, mark the affected package `blocked-on-user`, and continue only with a different unblocked package. Without approval, never defer the MUST_FIX.
 
 ## 3. Establish the baseline
 

@@ -57,7 +57,7 @@ Design and plan approval is always DECISION. Long logs and internal audit reason
 
 ## Runtime Setup
 
-`/airlock:setup` is an idempotent interactive bootstrap. It records runtime, selected Claude Code/OpenCode harnesses, host identity, one browser backend, absolute out-of-repo auth path, auth signal, and exact refresh command. It merges rather than overwrites `.mcp.json` and `opencode.json`/`opencode.jsonc`; conflicts stop with a diff.
+`/airlock:setup` is an idempotent interactive bootstrap. It records runtime, selected Claude Code/OpenCode harnesses, host identity, one browser backend, absolute out-of-repo auth path, auth signal, exact backend launch commands, and the exact refresh command. It merges rather than overwrites `.mcp.json` and `opencode.json`/`opencode.jsonc`; conflicts stop with a diff.
 
 ```json
 {
@@ -70,7 +70,11 @@ Design and plan approval is always DECISION. Long logs and internal audit reason
     "appUrl": "https://example.invalid",
     "authState": "C:/Users/me/.airlock/auth/project/state.json",
     "authSignal": { "url": "https://example.invalid/account", "selector": "[data-authenticated]" },
-    "refreshCommand": "npx playwright open --save-storage=... https://example.invalid"
+    "refreshCommand": "npx playwright open --save-storage=... https://example.invalid",
+    "launch": {
+      "claude": { "command": "cmd", "args": ["/c", "npx", "-y", "@playwright/mcp@latest", "--storage-state", "C:/Users/me/.airlock/auth/project/state.json"], "env": {} },
+      "opencode": { "command": ["npx.cmd", "-y", "@playwright/mcp@latest", "--storage-state", "C:/Users/me/.airlock/auth/project/state.json"], "environment": {} }
+    }
   }
 }
 ```
