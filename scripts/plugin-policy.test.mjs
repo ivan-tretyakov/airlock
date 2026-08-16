@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const agentsDirectory = path.join(root, "agents");
 const commandsDirectory = path.join(root, "commands");
 const leafAgents = [
+  "worker.md",
   "code-light.md",
   "code-standard.md",
   "code-complex.md",
@@ -292,7 +293,7 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.2.0");
+  assert.equal(plugin.version, "2.3.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
@@ -440,4 +441,147 @@ test("missing runtime configuration is checked silently", async () => {
   const start = await source("commands/start.md");
   assert.match(start, /check whether `.airlock\/config\.json` exists before reading/i);
   assert.match(start, /when absent.*native.*without.*error/is);
+});
+
+test("adaptive ceremony uses the multipurpose worker within explicit dispatch budgets", async () => {
+  const [worker, start, orchestrator] = await Promise.all([
+    source("agents/worker.md"),
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+  ]);
+  const metadata = frontmatter(worker);
+  assert.match(metadata, /^name: worker$/m);
+  assert.match(metadata, /^model: sonnet$/m);
+  assert.doesNotMatch(metadata, /\b(?:Agent|Task|Skill)\b/);
+  assert.match(worker, /investigate, implement, and verify.*one run/is);
+  assert.match(worker, /cannot review your own work/i);
+  assert.match(worker, /replaces.*investigate.*code.*verify.*not.*independent.*review/is);
+  for (const [filename, text] of [["start", start], ["orchestrator", orchestrator]]) {
+    assert.match(text, /Quick.*0.?1/is, filename + ": Quick budget");
+    assert.match(text, /Compact.*1.?2/is, filename + ": Compact budget");
+    assert.match(text, /Full-lite.*(?:at most|=).*3.*Crossing/is, filename + ": Full-lite budget");
+    assert.match(text, /prefer `worker`.*investigate.*code.*verify/is, filename + ": worker preference");
+    assert.match(text, /investigation.*user decision|Critical|independence/is, filename + ": specialist exceptions");
+    assert.match(text, /exceed.*budget.*PROGRESS.*reason/is, filename + ": budget exception");
+  }
+});
+
+test("release work is Compact until a direct publication mutation", async () => {
+  const [start, orchestrator, readme, conventions] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+    source("README.md"),
+    source("PROJECT-CONVENTIONS.template.md"),
+  ]);
+  for (const [filename, text] of [["start", start], ["orchestrator", orchestrator], ["README", readme]]) {
+    assert.match(text, /release PR.*Compact.*default/is, filename);
+    assert.match(text, /version bump.*changelog.*validation.*(?:open|opening).*PR/is, filename);
+    assert.match(text, /tag.*marketplace|registry|deploy/is, filename);
+    assert.match(text, /mutating step.*DECISION|DECISION.*mutating step/is, filename);
+    assert.match(text, /migrations.*credential.*irreversible.*Full/is, filename);
+  }
+  assert.match(conventions, /plugin\.json.*marketplace\.json.*changelog.*README/is);
+  assert.match(conventions, /three test suites.*claude plugin validate.*both manifests/is);
+  assert.match(conventions, /branch.*PR.*DECISION.*after.*merge.*tag.*publish.*second DECISION/is);
+});
+
+test("setup v2 bootstraps one shared browser backend across selected harnesses and hosts", async () => {
+  const [setup, start, readme, openCodeSetup] = await Promise.all([
+    source("commands/setup.md"),
+    source("commands/start.md"),
+    source("README.md"),
+    source(".opencode/command/airlock-setup.md"),
+  ]);
+  assert.match(setup, /interactive bootstrap/i);
+  assert.match(setup, /idempotent.*reconcil/is);
+  assert.match(setup, /exactly one.*playwright.*chrome-devtools.*none/is);
+  assert.match(setup, /claude.*opencode.*both/is);
+  assert.match(setup, /merge.*never silently overwrite.*show.*diff.*stop/is);
+  assert.match(setup, /"schema": "airlock\.config\/v2"/);
+  assert.match(setup, /"host".*"os".*"machine"/is);
+  assert.match(setup, /\.airlock\/config\.<hostname>\.json/);
+  assert.match(setup, /\.mcp\.json.*mcpServers/is);
+  assert.match(setup, /opencode\.jsonc?.*"mcp".*"type": "local".*"command": \[/is);
+  assert.match(setup, /"environment"/);
+  assert.match(setup, /--storage-state.*never `--isolated`.*never.*default profile/is);
+  assert.match(setup, /--user-data-dir.*--browserUrl/is);
+  assert.match(setup, /native Windows.*"cmd".*"\/c".*"npx"/is);
+  assert.match(setup, /OpenCode.*`npx\.cmd`/is);
+  assert.match(setup, /@playwright\/mcp@latest/);
+  assert.match(setup, /chrome-devtools-mcp@latest/);
+  assert.match(setup, /exact.*launch.*(?:command|argv).*config/is);
+  assert.match(setup, /Playwright.*state file.*chrome-devtools.*profile.*browserUrl/is);
+  assert.match(setup, /re-run \/airlock:setup on this host/i);
+  assert.match(setup, /state file.*never.*ownedPaths.*processPaths/is);
+  assert.match(setup, /one-line human login command.*wait.*state file exists/is);
+  assert.match(setup, /backend reachable.*auth signal/is);
+  assert.match(start, /browser gate.*preflight.*refreshCommand/is);
+  assert.match(readme, /airlock\.config\/v1.*remain.*valid/is);
+  assert.match(readme, /exact.*backend launch command/is);
+  assert.match(openCodeSetup, /browser.*bootstrap/i);
+});
+
+test("browser leaves return the configured refresh command on auth failure", async () => {
+  for (const filename of ["agents/browser-verify.md", "agents/visual-review.md"]) {
+    const text = await source(filename);
+    assert.match(text, /auth.*failure.*BLOCKED.*refreshCommand.*verbatim/is, filename);
+    assert.match(text, /never reads?.*state file/i, filename);
+  }
+});
+test("unattended mode parks decisions, resumes answers, and stops at hard gates or budget", async () => {
+  const [start, orchestrator, review, plan, status, decisions, readme] = await Promise.all([
+    source("commands/start.md"),
+    source("agents/orchestrator.md"),
+    source("commands/review.md"),
+    source("commands/plan.md"),
+    source("references/STATUS.template.md"),
+    source("references/DECISIONS.template.md"),
+    source("README.md"),
+  ]);
+  assert.match(plan, /unattended.*park.*approval|park.*approval.*unattended/is);
+  for (const [filename, text] of [["start", start], ["orchestrator", orchestrator], ["review", review]]) {
+    assert.match(text, /--unattended|AskUserQuestion.*unavailable/is, filename + ": activation");
+    assert.match(text, /read.*DECISIONS\.md.*first/is, filename + ": resume first");
+    assert.match(text, /blocked-on-user/is, filename + ": parked package");
+    assert.match(text, /continue.*next unblocked/is, filename + ": continue queue");
+    assert.match(text, /decision: <option>.*answered.*ledger.*unblock/is, filename + ": answer lifecycle");
+  }
+  assert.match(start, /Airlock: <weight>, <native\|opencode>, unattended/);
+  assert.match(start, /max Crossings.*default 5.*wall-clock/is);
+  assert.match(start, /design approval.*always-Full.*merges to main.*publication/is);
+  assert.match(start, /Last unattended run.*Completed.*Parked decisions.*Blocked.*Budget used.*Next action/is);
+  assert.match(decisions, /\| ID \| Asked \| Question \| Options \(2.?4\) \| Recommendation \| Blocks \| Status \|/);
+  assert.match(decisions, /Status.*open/i);
+  assert.match(status, /## Last unattended run/);
+  assert.match(readme, /DECISIONS\.md.*questions waiting for you/i);
+  assert.match(
+    review,
+    /Before any unrelated implementation.*In attended mode, use `AskUserQuestion`; in unattended mode, park the deferral decision/is,
+  );
+});
+
+test("every dispatch gets a minimal non-delegating contract", async () => {
+  const [start, plan, orchestrator] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("agents/orchestrator.md"),
+  ]);
+  for (const [filename, text] of [["start", start], ["plan", plan], ["orchestrator", orchestrator]]) {
+    assert.match(text, /before every dispatch/is, filename);
+    assert.match(text, /read-only.*ownedPaths.*\[\].*allowDispatch.*false/is, filename);
+  }
+});
+
+test("release sources and accepted designs have the required archive and line-ending policy", async () => {
+  const attributes = await source(".gitattributes");
+  assert.equal(
+    attributes.replaceAll("\r\n", "\n"),
+    "* text=auto\n*.md text eol=lf\n*.mjs text eol=lf\n*.json text eol=lf\n",
+  );
+  for (const archived of [
+    "docs/airlock/archive/2026-08/2026-08-13-airlock-improvements-design.md",
+    "docs/airlock/archive/2026-08/2026-08-14-airlock-2.3-design.md",
+  ]) {
+    assert.match(await source(archived), /^# Airlock/m, archived);
+  }
 });

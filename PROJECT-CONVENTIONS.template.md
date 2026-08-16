@@ -13,9 +13,9 @@ Airlock is inactive in normal chats. Use it only after the user invokes `/airloc
 Cowork), `/airlock-start` (OpenCode), or explicitly launches `airlock:orchestrator` as the main agent.
 Project `.airlock/config.json` selects `native` or `opencode`; it never activates Airlock.
 
-Airlock classifies work as Quick, Compact, or Full. Quick uses exactly one leaf worker end-to-end and
-creates no design, plan, ledger, Crossing, or review artifacts. Full uses the explicit brainstorm, plan,
-ship, review, and debug commands. `/airlock:stop` ends command-activated mode.
+Airlock classifies work as Quick, Compact, or Full. Quick uses at most one leaf end-to-end and creates no
+workflow artifacts. Compact normally uses one multipurpose `worker`. Full-lite prefers one worker per
+Crossing with required gates only. `/airlock:stop` ends command-activated mode.
 
 Only the main session delegates. Every worker is a leaf. Ask before each Fable leaf invocation, including
 when the main session uses Fable or an earlier Fable leaf was approved.
@@ -38,7 +38,10 @@ when the main session uses Fable or an earlier Fable leaf was approved.
    validation must be bounded FOREGROUND runs inside the turn>`
 - **Browser and visual verification:** `<MCP/browser availability, startup URL, cited visual spec, screenshot
   home, required desktop/mobile viewports, and whether authenticated state can be shared with subagents>`
-- **Browser MCP backend:** `<pin exactly one backend and record whether the host exposes it to restricted subagents>`
+- **Airlock setup v2:** `<selected claude/opencode harnesses; host overlays; absolute out-of-repo auth home; app URL; auth signal; exact refresh command>`
+- **Browser MCP backend:** `<pin exactly one: playwright, chrome-devtools, or none; same browser registration/flags/auth state in every selected harness>`
+- **Unattended budget:** `<default max Crossings (5 unless overridden) and/or max wall-clock; PR decision mirror if available>`
+- **Decision file:** `<docs/airlock/DECISIONS.md; source of truth for questions waiting for the user>`
 - **Temporary artifact home:** `<approved task-owned scratch directory; exact-path cleanup only>`
 - **Retained evidence home:** `<stable screenshots/logs/traces directory and naming/reference convention>`
 - **Cleanup policy:** `<process stop command, retained-vs-temporary rules, and paths/state that must never be cleaned>`
@@ -64,6 +67,8 @@ when the main session uses Fable or an earlier Fable leaf was approved.
   docs/generation-log.jsonl (disclosure requirement); commit each asset with its import sidecar>`
 - **Branch + push policy:** `<e.g. work lands directly on main; commit as part of the task; push only when
   asked>`
+- **Release flow:** `<bump plugin.json + marketplace.json -> update changelog/README -> run the three test suites + claude plugin validate --strict for both manifests -> branch + PR (DECISION: link) -> after user merge, tag/publish only behind a second DECISION>`
+- **Release escalation:** `<migrations, credential changes, irreversible external state, and direct publication remain Full or explicitly gated>`
 - **Commit message convention:** `<e.g. conventional commits; end with the Co-Authored-By trailer>`
 - **Parallel sessions:** `<e.g. two sessions often share one checkout → every plan MUST declare a disjoint
   file contract; git pull --rebase --autostash before every commit; scoped git add only>`

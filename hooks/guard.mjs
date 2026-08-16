@@ -181,7 +181,9 @@ function validV2Contract(contract) {
       (typeof contract.root === "string" && path.isAbsolute(contract.root))) &&
     (contract.processPaths === undefined || validPathEntries(contract.processPaths)) &&
     (contract.expiresAt === undefined || validIsoTimestamp(contract.expiresAt)) &&
-    (contract.allowDispatch === undefined || typeof contract.allowDispatch === "boolean")
+    (contract.allowDispatch === undefined || typeof contract.allowDispatch === "boolean") &&
+    (contract.actorMode === undefined ||
+      ["agent-id", "single-actor"].includes(contract.actorMode))
   );
 }
 
@@ -190,7 +192,9 @@ function normalizeAbsolute(absolutePath) {
     .split(path.sep)
     .join("/")
     .replace(/\\/g, "/");
-  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+  return process.platform === "win32" || process.platform === "darwin"
+    ? normalized.toLowerCase()
+    : normalized;
 }
 
 function absolutePattern(entry, root) {
@@ -536,6 +540,14 @@ function v2TargetAllowed(absoluteTarget, actor, policy) {
   };
 }
 
+function actorFor(input, contract) {
+  const actorMode = contract.actorMode ?? "agent-id";
+  if (actorMode === "single-actor") {
+    return "worker";
+  }
+  return input?.agent_id === undefined ? "top-level" : "worker";
+}
+
 let activeV2MustFailClosed = false;
 
 function main() {
@@ -577,7 +589,7 @@ function main() {
     activeV2MustFailClosed = true;
 
     const contractRoot = contract.root ?? located.root;
-    const actor = input?.agent_id === undefined ? "top-level" : "worker";
+    const actor = actorFor(input, contract);
     const workerPatterns = contract.ownedPaths.map((entry) =>
       absolutePattern(entry, contractRoot)
     );

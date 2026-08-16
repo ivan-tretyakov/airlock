@@ -13,3 +13,10 @@ Links: [design](<spec-path>) | [plan](<plan-path>) | [ledger](<ledger-path>) | R
 ## Recently closed
 | Pack | Outcome | Commit | Closed |
 |---|---|---|---|
+
+## Last unattended run
+Completed: <Crossing IDs or none>
+Parked decisions (IDs): <IDs or none>
+Blocked: <packages or none>
+Budget used: <Crossings and/or wall-clock>
+Next action: <one exact action>
