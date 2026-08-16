@@ -1,7 +1,7 @@
 # Airlock Improvement Design
 
 **Date:** 2026-08-13
-**Source:** `docs/airlock-review-2026-08-13.md`
+**Source:** private Airlock 2.1 session review (not published)
 **Target:** the next Airlock release after 2.1.0
 
 ## Goal

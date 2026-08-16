@@ -76,6 +76,8 @@ Write or reconcile `.airlock/config.json`:
 }
 ```
 
+The example shows native Windows launch forms; Linux and macOS store plain `npx` commands with POSIX absolute paths.
+
 Replace examples with detected/approved exact values. A v1 config with `"schema": "airlock.config/v1"` remains valid for runtime-only use; missing `browser` means no browser gates are configured.
 
 A config is host-bound. If the project runs on multiple machines, keep runtime and harness choice in the base config and store the host-specific `browser` block plus `host` in `.airlock/config.<hostname>.json`. Merge the matching overlay at runtime. Never reuse another host's launch commands or auth path.

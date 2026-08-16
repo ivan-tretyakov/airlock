@@ -79,6 +79,8 @@ Design and plan approval is always DECISION. Long logs and internal audit reason
 }
 ```
 
+The example shows native Windows launch forms; Linux and macOS store plain `npx` commands with POSIX absolute paths.
+
 `airlock.config/v1` files remain valid for runtime-only use; a missing `browser` block means no browser gates are configured. Multi-host projects use `.airlock/config.<hostname>.json` browser overlays so Windows, Linux, and macOS never reuse incompatible commands or auth paths.
 
 Runtime resolution is:
@@ -104,7 +106,7 @@ Runtime resolution is:
 
 ## Enforcement Hooks
 
-The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before every dispatch. Read-only leaves use `ownedPaths: []` and `allowDispatch: false`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, `allowDispatch`, and `actorMode`: `agent-id` (default), `trust-toplevel`, or `single-actor`. The safest fallback on a host that never emits `agent_id` is `single-actor`, which applies worker rules to everyone. README smoke test: write a contract, verify an orchestrator process-path edit and a worker owned-path edit both succeed under `agent-id`; repeat with `single-actor` expecting worker scope only.
+The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before every dispatch. Read-only leaves use `ownedPaths: []` and `allowDispatch: false`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, `allowDispatch`, and `actorMode`: `agent-id` (default) or `single-actor`. The safest fallback on a host that never emits `agent_id` is `single-actor`, which applies worker rules to everyone. README smoke test: write a contract, verify an orchestrator process-path edit and a worker owned-path edit both succeed under `agent-id`; repeat with `single-actor` expecting worker scope only.
 
 While a valid active v2 contract exists, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. Serialize all file-writing workers while this session-global contract is active; parallelize only read-only workers until per-worker contracts exist. Bash and PowerShell both block broad staging (including unscoped update staging for v2) and obvious out-of-contract redirection or write-cmdlet targets. File and shell targets resolve through their nearest existing ancestor so symlink/junction escapes are denied, and write-bearing compound commands with an unsafe directory change are denied. This common screening of shell writes is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior, including unscoped `git add -u` and `git add --update`. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 

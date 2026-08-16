@@ -183,7 +183,7 @@ function validV2Contract(contract) {
     (contract.expiresAt === undefined || validIsoTimestamp(contract.expiresAt)) &&
     (contract.allowDispatch === undefined || typeof contract.allowDispatch === "boolean") &&
     (contract.actorMode === undefined ||
-      ["agent-id", "trust-toplevel", "single-actor"].includes(contract.actorMode))
+      ["agent-id", "single-actor"].includes(contract.actorMode))
   );
 }
 
@@ -544,9 +544,6 @@ function actorFor(input, contract) {
   const actorMode = contract.actorMode ?? "agent-id";
   if (actorMode === "single-actor") {
     return "worker";
-  }
-  if (actorMode === "trust-toplevel") {
-    return "top-level";
   }
   return input?.agent_id === undefined ? "top-level" : "worker";
 }

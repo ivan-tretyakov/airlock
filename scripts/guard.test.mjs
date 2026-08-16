@@ -651,7 +651,7 @@ test("v2 treats relative root as malformed and fails open", async (t) => {
   }).decision, "allow");
 });
 
-test("v2 actorMode supports explicit degraded-host fallbacks", async (t) => {
+test("v2 actorMode supports the fail-closed single-actor fallback", async (t) => {
   const root = await makeProject(t);
   const owned = path.join(root, "src", "feature.ts");
   const processDocument = path.join(root, "docs", "airlock", "STATUS.md");
@@ -677,39 +677,22 @@ test("v2 actorMode supports explicit degraded-host fallbacks", async (t) => {
     tool_input: {},
     cwd: root,
   }).decision, "deny", "single-actor remains a leaf");
-
-  await writeContract(root, {
-    schema: "airlock.contract/v2",
-    actorMode: "trust-toplevel",
-    ownedPaths: ["src/**"],
-    processPaths: ["docs/airlock/STATUS.md"],
-  });
-  assert.equal(runGuard({
-    tool_name: "Write",
-    tool_input: { file_path: processDocument },
-    cwd: root,
-    agent_id: "field-is-untrusted",
-  }).decision, "allow", "trust-toplevel applies top-level scope");
-  assert.equal(runGuard({
-    tool_name: "Write",
-    tool_input: { file_path: owned },
-    cwd: root,
-    agent_id: "field-is-untrusted",
-  }).decision, "deny", "trust-toplevel never grants worker scope");
 });
 
-test("v2 rejects unknown actorMode values", async (t) => {
+test("v2 rejects unsafe or unknown actorMode values", async (t) => {
   const root = await makeProject(t);
-  await writeContract(root, {
-    schema: "airlock.contract/v2",
-    actorMode: "guess",
-    ownedPaths: [],
-  });
-  assert.equal(runGuard({
-    tool_name: "Write",
-    tool_input: { file_path: path.join(root, "package.json") },
-    cwd: root,
-  }).decision, "allow");
+  for (const actorMode of ["trust-toplevel", "guess"]) {
+    await writeContract(root, {
+      schema: "airlock.contract/v2",
+      actorMode,
+      ownedPaths: [],
+    });
+    assert.equal(runGuard({
+      tool_name: "Write",
+      tool_input: { file_path: path.join(root, "package.json") },
+      cwd: root,
+    }).decision, "allow", actorMode + " is malformed and fails open");
+  }
 });
 
 test("browser config v2 never activates the dispatch guard", async (t) => {
