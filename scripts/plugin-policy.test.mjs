@@ -293,10 +293,61 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.3.0");
+  assert.equal(plugin.version, "2.4.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
+});
+
+test("orchestrator loads start.md via the plugin root, not a bare relative path", async () => {
+  const orchestrator = await source("agents/orchestrator.md");
+  assert.match(orchestrator, /\$\{CLAUDE_PLUGIN_ROOT\}\/commands\/start\.md/);
+  assert.doesNotMatch(orchestrator, /read `commands\/start\.md` from this plugin/i);
+  assert.doesNotMatch(orchestrator, /read `commands\/start\.md`(?! from)/i);
+});
+
+test("Full work is Claude Code host only; OpenCode hosts block it", async () => {
+  const [start, ocStart, ocPlan, ocShip, ocBrainstorm, ocReview, ocDebug] = await Promise.all([
+    source("commands/start.md"),
+    source(".opencode/command/airlock-start.md"),
+    source(".opencode/command/airlock-plan.md"),
+    source(".opencode/command/airlock-ship.md"),
+    source(".opencode/command/airlock-brainstorm.md"),
+    source(".opencode/command/airlock-review.md"),
+    source(".opencode/command/airlock-debug.md"),
+  ]);
+
+  assert.match(start, /Full work .*Claude Code host only/i);
+  assert.match(start, /Host harness gate/i);
+  assert.match(start, /never downgraded to Compact/i);
+  assert.match(start, /rerun the task from Claude Code/i);
+  assert.match(start, /Claude-hosted Full session .*`runtime: opencode`/i);
+
+  for (const wrapper of [ocStart, ocPlan, ocShip, ocBrainstorm, ocReview]) {
+    assert.match(wrapper, /OpenCode host/i, "wrapper declares its host");
+    assert.match(wrapper, /BLOCKED/i, "wrapper blocks");
+    assert.match(wrapper, /Claude Code guard hook/i, "wrapper names the missing guard");
+  }
+
+  assert.match(ocStart, /\*?\*?Quick and Compact\*?\*? work may proceed/i);
+  assert.match(ocPlan, /BLOCKED/);
+  assert.match(ocDebug, /Quick and Compact debugging only/i);
+  assert.match(ocDebug, /BLOCKED/);
+});
+
+test("reviewer bundle is executable and pinned to the candidate identity", async () => {
+  const [plan, lifecycle] = await Promise.all([
+    source("commands/plan.md"),
+    source("references/LIFECYCLE.md"),
+  ]);
+  for (const text of [plan, lifecycle]) {
+    assert.match(text, /build-review-bundle\.mjs/);
+    assert.match(text, /base SHA \+ staged product-diff hash|commit\/tree/i);
+    assert.match(text, /regenerate it, never patch it|regenerate, never patch/i);
+    assert.match(text, /task-owned temporary artifact/i);
+  }
+  assert.match(plan, /fails closed/);
+  assert.match(lifecycle, /--max-tokens 15000/);
 });
 
 function assertInteractionContract(text, filename) {
@@ -416,7 +467,8 @@ test("SessionStart compact injects one conditional Airlock resume context line",
   assert.equal(lines.length, 1);
   assert.match(lines[0], /When Airlock Full work is active/i);
   assert.match(lines[0], /otherwise ignore/i);
-  assert.match(lines[0], /design.*plan.*ledger Resume checkpoint.*docs\/airlock\/STATUS\.md/i);
+  assert.match(lines[0], /design.*plan.*ledger.*Resume checkpoint.*sections it names.*docs\/airlock\/STATUS\.md/i);
+  assert.match(lines[0], /never reread the whole ledger/i);
 
   const policySources = await Promise.all([
     source("commands/start.md"),

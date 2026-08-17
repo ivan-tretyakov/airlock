@@ -39,6 +39,11 @@ export const AIRLOCK_HEADINGS = Object.freeze([
   "Action needed",
 ]);
 
+export const OPTIONAL_BUDGET_KEYS = Object.freeze([
+  "wallClockApproved",
+  "highEffortApproved",
+]);
+
 export const LEGACY_MANIFEST_SCHEMA = deepFreeze({
   id: LEGACY_MANIFEST_SCHEMA_ID,
   keys: {
@@ -70,6 +75,9 @@ export const LEGACY_MANIFEST_SCHEMA = deepFreeze({
     cleanup: ["session", "evidence", "manifest", "verifyAbsence"],
     retention: ["session", "evidence", "manifest", "transcript"],
     policy: ["identity", "proof"],
+  },
+  optionalKeys: {
+    root: OPTIONAL_BUDGET_KEYS,
   },
   enums: {
     runtime: ["opencode"],
@@ -181,6 +189,9 @@ export const MANIFEST_SCHEMA = deepFreeze({
     retention: ["session", "manifest", "temporaryDirectory", "transcript"],
     policy: ["identity", "proof"],
   },
+  optionalKeys: {
+    root: OPTIONAL_BUDGET_KEYS,
+  },
   enums: {
     runtime: ["opencode"],
     workerStatus: ["done", "partial", "blocked"],
@@ -199,6 +210,22 @@ const MAX_PROMPT_CHARACTERS = 24_000;
 const MAX_COMMIT_MESSAGE_BYTES = 64 * 1024;
 const MAX_VALIDATION_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_VALIDATIONS = 100;
+
+// Airlock 2.4 budget defaults (WS-4). The effective worker wall clock is
+// min(manifest.timeoutMs, DEFAULT_WALL_CLOCK_MS) unless the manifest carries
+// the explicit root boolean `wallClockApproved: true`. A route variant or an
+// opencode.config effort value in HIGH_EFFORT_VALUES requires the explicit
+// root boolean `highEffortApproved: true`; an effort value outside
+// ALLOWED_EFFORT_VALUES is rejected regardless of approval. Both flags are
+// recorded in the run summary next to the selected route so the independent
+// audit sees them.
+const DEFAULT_WALL_CLOCK_MS = 45 * 60_000;
+const PROVIDER_EFFORT_VALUES = Object.freeze({
+  openai: new Set(["none", "minimal", "low", "medium", "high", "xhigh"]),
+  anthropic: new Set(["low", "medium", "high", "max"]),
+  google: new Set(["minimal", "low", "medium", "high"]),
+});
+const HIGH_EFFORT_VALUES = new Set(["high", "xhigh", "max"]);
 const PROCESS_EXIT_GRACE_MS = 5_000;
 const TREE_TERMINATION_GRACE_MS = 750;
 const INVALID_ORIGIN_PUSH_URL =
@@ -276,6 +303,102 @@ function exactKeys(value, allowed, code = "manifest_unknown_key") {
     actual.some((key, index) => key !== expected[index])
   ) {
     fail(code);
+  }
+}
+
+// Like exactKeys, but the optional keys may be present (with their validated
+// value) or absent; every required key must still be present.
+function exactKeysWithOptional(value, required, optional, code = "manifest_unknown_key") {
+  if (!isRecord(value)) fail("manifest_malformed");
+  const requiredSet = new Set(required);
+  const optionalSet = new Set(optional);
+  const actual = Object.keys(value);
+  if (actual.some((key) => !requiredSet.has(key) && !optionalSet.has(key))) {
+    fail(code);
+  }
+  if ([...requiredSet].some((key) => !actual.includes(key))) {
+    fail(code);
+  }
+}
+
+// Collects every effort-bearing value (route `variant`, `variant`/`effort`/
+// `reasoningEffort` keys anywhere in opencode.config). Returns an array of
+// { key, value } for the found effort entries — never recurses into arbitrary
+// string fields. Used to (a) reject unknown effort values and (b) require
+// approval for high-cost values regardless of where they sit.
+function findEffortEntries(value, pathSegments = [], depth = 0) {
+  if (depth > 32) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      findEffortEntries(item, [...pathSegments, String(index)], depth + 1),
+    );
+  }
+  if (!isRecord(value)) return [];
+  const entries = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (
+      /^(variant|effort|reasoning[_-]?effort)$/i.test(key) &&
+      typeof item === "string"
+    ) {
+      entries.push({ key, value: item.toLowerCase(), path: [...pathSegments, key] });
+    }
+    entries.push(...findEffortEntries(item, [...pathSegments, key], depth + 1));
+  }
+  return entries;
+}
+
+function assertBudgetApprovals(value) {
+  for (const flag of OPTIONAL_BUDGET_KEYS) {
+    if (value[flag] !== undefined && value[flag] !== true) {
+      fail("manifest_budget_invalid");
+    }
+  }
+  const selectedIdentity = splitSelectedModel(value.route.model);
+  const selectedVariant = String(value.route.variant).toLowerCase();
+  const providerValues = PROVIDER_EFFORT_VALUES[selectedIdentity.provider];
+  const customVariants = value.opencode.config?.provider?.[selectedIdentity.provider]
+    ?.models?.[selectedIdentity.model]?.variants;
+  const customVariantAllowed = isRecord(customVariants) &&
+    Object.prototype.hasOwnProperty.call(customVariants, value.route.variant);
+  if (!providerValues?.has(selectedVariant) && !customVariantAllowed) {
+    fail("manifest_effort_unknown");
+  }
+  const effortEntries = [
+    { key: "route.variant", value: selectedVariant },
+    ...findEffortEntries(value.opencode.config),
+  ];
+  for (const entry of effortEntries) {
+    if (!PROVIDER_EFFORT_VALUES[selectedIdentity.provider]?.has(entry.value) &&
+        !HIGH_EFFORT_VALUES.has(entry.value) &&
+        entry.key !== "route.variant") {
+      // Config may contain provider-specific custom variants; only reject
+      // unknown values in the selected route, not unrelated provider config.
+      continue;
+    }
+    if (entry.key === "route.variant" && !providerValues?.has(entry.value) && !customVariantAllowed) {
+      fail("manifest_effort_unknown");
+    }
+  }
+  if (value.highEffortApproved !== true) {
+    if (effortEntries.some((entry) => HIGH_EFFORT_VALUES.has(entry.value))) {
+      fail("manifest_effort_not_approved");
+    }
+  }
+}
+
+function effectiveWallClockMs(value) {
+  return value.wallClockApproved === true
+    ? value.timeoutMs
+    : Math.min(value.timeoutMs, DEFAULT_WALL_CLOCK_MS);
+}
+
+// Over-cap wall clock requires explicit approval; a manifest that requests
+// more than DEFAULT_WALL_CLOCK_MS without `wallClockApproved: true` is
+// rejected, never silently clamped.
+function assertWallClockApproved(value) {
+  if (value.wallClockApproved === true) return;
+  if (value.timeoutMs > DEFAULT_WALL_CLOCK_MS) {
+    fail("manifest_timeout_not_approved");
   }
 }
 
@@ -690,10 +813,16 @@ function validateStatusEntry(entry) {
 }
 
 function validateWriterManifest(value, { manifestPath } = {}) {
-  exactKeys(value, MANIFEST_SCHEMA.keys.root);
+  exactKeysWithOptional(
+    value,
+    MANIFEST_SCHEMA.keys.root,
+    OPTIONAL_BUDGET_KEYS,
+  );
   assertJsonValue(value);
   if (value.schema !== MANIFEST_SCHEMA_ID) fail("manifest_schema_unknown");
   assertCommonManifestFields(value);
+  assertBudgetApprovals(value);
+  assertWallClockApproved(value);
   const selectedIdentity = splitSelectedModel(value.route.model);
 
   exactKeys(value.opencode, MANIFEST_SCHEMA.keys.opencode);
@@ -966,8 +1095,14 @@ function validateWriterManifest(value, { manifestPath } = {}) {
 }
 
 function validateLegacyManifest(value, { manifestPath } = {}) {
-  exactKeys(value, LEGACY_MANIFEST_SCHEMA.keys.root);
+  exactKeysWithOptional(
+    value,
+    LEGACY_MANIFEST_SCHEMA.keys.root,
+    OPTIONAL_BUDGET_KEYS,
+  );
   assertJsonValue(value);
+  assertBudgetApprovals(value);
+  assertWallClockApproved(value);
 
   if (value.schema !== LEGACY_MANIFEST_SCHEMA_ID) fail("manifest_schema_unknown");
   if (value.runtime !== "opencode") fail("manifest_runtime_unknown");
@@ -1230,10 +1365,17 @@ export async function loadManifest(
   } catch {
     fail("manifest_json_malformed");
   }
-  return {
-    manifest: validateManifest(parsed, { manifestPath }),
-    actualSha256,
-  };
+  try {
+    return {
+      manifest: validateManifest(parsed, { manifestPath }),
+      actualSha256,
+    };
+  } catch (error) {
+    // The parsed manifest is safe to retain internally so a blocked summary can
+    // preserve validated-shape route context without ever echoing its contents.
+    error.parsedManifest = parsed;
+    throw error;
+  }
 }
 
 function removeEnvironmentKeys(environment, names, prefixes = []) {
@@ -3531,22 +3673,47 @@ function emptyEventSummary() {
   };
 }
 
-function initialSummary(manifest = null, manifestPath = null) {
-  const evidencePath = manifest?.artifacts?.evidencePath ?? manifest?.evidencePath ?? null;
+function prevalidationSelectedRoute(manifest) {
+  if (!isRecord(manifest) || !isRecord(manifest.route)) return null;
+  const route = manifest.route;
+  const identifier = (value) =>
+    typeof value === "string" && SAFE_IDENTIFIER.test(value) ? value : null;
+  const targetDirectory =
+    typeof route.targetDirectory === "string" &&
+    route.targetDirectory.length <= 4096 &&
+    isAbsolutePath(route.targetDirectory)
+      ? route.targetDirectory
+      : null;
+  const branch =
+    typeof route.branch === "string" && SAFE_BRANCH.test(route.branch)
+      ? route.branch
+      : null;
+  const timeoutMs = manifest.timeoutMs;
+  return {
+    runtime: manifest.runtime === "opencode" ? manifest.runtime : null,
+    agent: identifier(route.agent),
+    model: identifier(route.model),
+    variant: identifier(route.variant),
+    targetDirectory,
+    branch,
+    wallClockMs:
+      Number.isSafeInteger(timeoutMs) && timeoutMs > 0
+        ? effectiveWallClockMs(manifest)
+        : null,
+    wallClockApproved: manifest.wallClockApproved === true,
+    highEffortApproved: manifest.highEffortApproved === true,
+  };
+}
+
+function initialSummary(manifest = null, manifestPath = null, prevalidation = false) {
+  const artifactManifest = prevalidation ? null : manifest;
+  const evidencePath =
+    artifactManifest?.artifacts?.evidencePath ?? artifactManifest?.evidencePath ?? null;
   return {
     schema: RESULT_SCHEMA_ID,
     status: "blocked",
     classification: "launcher_blocked",
-    selectedRoute: manifest
-      ? {
-          runtime: manifest.runtime,
-          agent: manifest.route.agent,
-          model: manifest.route.model,
-          variant: manifest.route.variant,
-          targetDirectory: manifest.route.targetDirectory,
-          branch: manifest.route.branch,
-        }
-      : null,
+    selectedRoute: prevalidationSelectedRoute(manifest),
     effectiveRoute: null,
     session: { id: null, state: "not-created", absenceVerified: true },
     events: emptyEventSummary(),
@@ -3559,7 +3726,7 @@ function initialSummary(manifest = null, manifestPath = null) {
     },
     cleanup: {
       session: "not-created",
-      evidence: manifest
+      evidence: artifactManifest
         ? { path: evidencePath, state: "not-created", verified: true }
         : { path: null, state: "unknown", verified: false },
       manifest: {
@@ -3567,23 +3734,23 @@ function initialSummary(manifest = null, manifestPath = null) {
         state: manifestPath ? "retained" : "unknown",
         verified: Boolean(manifestPath),
       },
-      temporaryDirectory: manifest?.artifacts
+      temporaryDirectory: artifactManifest?.artifacts
         ? {
-            path: manifest.artifacts.temporaryDirectory,
+            path: artifactManifest.artifacts.temporaryDirectory,
             state: "not-created",
             verified: true,
           }
         : null,
-      message: manifest?.artifacts
+      message: artifactManifest?.artifacts
         ? {
-            path: manifest.artifacts.messagePath,
+            path: artifactManifest.artifacts.messagePath,
             state: "not-created",
             verified: true,
           }
         : null,
-      hooksDirectory: manifest?.artifacts
+      hooksDirectory: artifactManifest?.artifacts
         ? {
-            path: manifest.artifacts.hooksDirectory,
+            path: artifactManifest.artifacts.hooksDirectory,
             state: "not-created",
             verified: true,
           }
@@ -3956,7 +4123,7 @@ async function runWriterExternalAgent(
         args: [...invocation.prefixArgs, ...buildRunArguments(manifest)],
         cwd: manifest.route.targetDirectory,
         env: environment,
-        timeoutMs: manifest.timeoutMs,
+        timeoutMs: effectiveWallClockMs(manifest),
         stdoutPath: manifest.artifacts.evidencePath,
         captureStdout: false,
       });
@@ -4058,7 +4225,7 @@ async function runWriterExternalAgent(
         identity.provider !== manifest.expected.effectiveIdentity.provider ||
         identity.model !== manifest.expected.effectiveIdentity.model ||
         (identity.agent && identity.agent !== manifest.route.agent) ||
-        (identity.variant && identity.variant !== manifest.route.variant)
+        identity.variant !== manifest.route.variant
       ) {
         add("effective_identity_mismatch");
       } else {
@@ -4272,7 +4439,7 @@ async function runLegacyExternalAgent(
         args,
         cwd: manifest.route.targetDirectory,
         env: environment,
-        timeoutMs: manifest.timeoutMs,
+        timeoutMs: effectiveWallClockMs(manifest),
         stdoutPath: manifest.evidencePath,
         captureStdout: false,
       }),
@@ -4417,8 +4584,8 @@ async function runLegacyExternalAgent(
       } else if (
         identity.provider !== manifest.expected.effectiveIdentity.provider ||
         identity.model !== manifest.expected.effectiveIdentity.model ||
-        (identity.agent && identity.agent !== manifest.route.agent) ||
-        (identity.variant && identity.variant !== manifest.route.variant)
+         (identity.agent && identity.agent !== manifest.route.agent) ||
+         identity.variant !== manifest.route.variant
       ) {
         addFailure(
           failures,
@@ -4700,8 +4867,8 @@ export async function runExternalAgent(
     : runLegacyExternalAgent(manifest, { manifestPath }, dependencyOverrides);
 }
 
-function blockedCliSummary(code, manifestPath = null) {
-  const summary = initialSummary(null, manifestPath);
+function blockedCliSummary(code, manifestPath = null, manifest = null) {
+  const summary = initialSummary(manifest, manifestPath, manifest !== null);
   summary.classification = code;
   if (code === "manifest_hash_mismatch") {
     summary.actionNeeded = "supply the sha256 of the exact manifest bytes";
@@ -4719,15 +4886,21 @@ export async function executeCli(argv, dependencyOverrides = {}) {
   } catch (error) {
     return blockedCliSummary(launcherClassification(error));
   }
+  let manifest = null;
   try {
-    const { manifest } = await loadManifest(cli, dependencies);
+    const loaded = await loadManifest(cli, dependencies);
+    manifest = loaded.manifest;
     return await runExternalAgent(
       manifest,
       { manifestPath: cli.manifestPath },
       dependencies,
     );
   } catch (error) {
-    return blockedCliSummary(launcherClassification(error), cli.manifestPath);
+    return blockedCliSummary(
+      launcherClassification(error),
+      cli.manifestPath,
+      error.parsedManifest ?? manifest,
+    );
   }
 }
 
@@ -4761,6 +4934,8 @@ export function isDirectExecutionPath(
     ? argument.toLowerCase() === module.toLowerCase()
     : argument === module;
 }
+
+export { assertBudgetApprovals };
 
 const isDirectExecution = isDirectExecutionPath(
   process.argv[1],

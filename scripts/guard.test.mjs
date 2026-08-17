@@ -734,3 +734,224 @@ test("v2 treats Darwin paths case-insensitively through a non-existing suffix", 
     agent_id: "worker-1",
   }, { importPath: preloadPath }).decision, "allow");
 });
+
+const LEDGER_CONTRACT = {
+  schema: "airlock.contract/v2",
+  ownedPaths: ["src/**"],
+  processPaths: ["docs/airlock/**"],
+};
+
+async function writeLedger(root, content) {
+  await mkdir(path.join(root, "docs", "airlock", "ledger"), { recursive: true });
+  await writeFile(
+    path.join(root, "docs", "airlock", "ledger", "work.md"),
+    content,
+  );
+  return path.join(root, "docs", "airlock", "ledger", "work.md");
+}
+
+test("ledger hygiene denies a Write with multiple checkpoint headings", async (t) => {
+  const root = await makeProject(t, LEDGER_CONTRACT);
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  const verdict = runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\nold\n\n## Resume checkpoint\n\nnew\n",
+    },
+    cwd: root,
+  });
+  assert.equal(verdict.decision, "deny");
+  assert.match(verdict.reason, /Resume checkpoint/i);
+});
+
+test("ledger hygiene denies appending a checkpoint via Edit", async (t) => {
+  const root = await makeProject(t, LEDGER_CONTRACT);
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "state",
+      new_string: "state\n\n## Resume Checkpoint\n\nnew state",
+    },
+    cwd: root,
+  }).decision, "deny");
+
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "## Resume Checkpoint\n\nstate",
+      new_string: "## Resume Checkpoint\n\nrefreshed state",
+    },
+    cwd: root,
+  }).decision, "allow", "in-place checkpoint replacement is allowed");
+});
+
+test("ledger hygiene enforces the line cap and allows the shrink path", async (t) => {
+  const root = await makeProject(t, LEDGER_CONTRACT);
+  const big = "# Ledger\n\n## Resume Checkpoint\n\n" + "filler\n".repeat(900);
+  const ledger = await writeLedger(root, big);
+
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "filler",
+      new_string: "changed",
+    },
+    cwd: root,
+  }).decision, "deny", "edits to an over-cap ledger are denied");
+
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\nshrunk\n",
+    },
+    cwd: root,
+  }).decision, "allow", "a full Write below the cap is the cleanup path");
+
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n" + "filler\n".repeat(900),
+    },
+    cwd: root,
+  }).decision, "deny", "writes that keep the ledger over the cap are denied");
+});
+
+test("ledger hygiene stays silent for non-ledger paths and new ledgers", async (t) => {
+  const root = await makeProject(t, LEDGER_CONTRACT);
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: path.join(root, "src", "feature.ts"),
+      content: "## Resume Checkpoint\n".repeat(5),
+    },
+    cwd: root,
+    agent_id: "worker-1",
+  }).decision, "allow", "non-ledger paths are not screened");
+
+  const freshLedger = path.join(root, "docs", "airlock", "ledger", "new.md");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: freshLedger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\ninitial\n",
+    },
+    cwd: root,
+  }).decision, "allow", "a first checkpoint on a fresh ledger is allowed");
+});
+
+test("ledger hygiene applies under contract v1 as well", async (t) => {
+  const root = await makeProject(t, {
+    schema: "airlock.contract/v1",
+    ownedPaths: ["docs/**/*.md"],
+  });
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\na\n\n## Resume Checkpoint\n\nb\n",
+    },
+    cwd: root,
+  }).decision, "deny");
+});
+
+test("ledger hygiene enforces global without any dispatch contract", async (t) => {
+  const root = await makeProject(t);
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\na\n\n## Resume Checkpoint\n\nb\n",
+    },
+    cwd: root,
+  }).decision, "deny", "no-contract second checkpoint via Write is denied");
+
+  const fresh = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: fresh,
+      old_string: "state",
+      new_string: "state\n\n## Resume Checkpoint\n\nnew state",
+    },
+    cwd: root,
+  }).decision, "deny", "no-contract checkpoint-introducing Edit is denied");
+});
+
+test("ledger hygiene persists for malformed and expired contracts", async (t) => {
+  const root = await makeProject(t, "not-json{");
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\na\n\n## Resume Checkpoint\n\nb\n",
+    },
+    cwd: root,
+  }).decision, "deny", "malformed contract does not disable hygiene");
+
+  await writeContract(root, {
+    schema: "airlock.contract/v2",
+    ownedPaths: ["src/**"],
+    expiresAt: new Date(0).toISOString(),
+  });
+  assert.equal(runGuard({
+    tool_name: "Write",
+    tool_input: {
+      file_path: ledger,
+      content: "# Ledger\n\n## Resume Checkpoint\n\na\n\n## Resume Checkpoint\n\nb\n",
+    },
+    cwd: root,
+  }).decision, "deny", "expired contract does not disable hygiene");
+});
+
+test("ledger hygiene denies an Edit replacing one checkpoint with two", async (t) => {
+  const root = await makeProject(t);
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "## Resume Checkpoint\n\nstate",
+      new_string: "## Resume Checkpoint\n\na\n\n## Resume Checkpoint\n\nb",
+    },
+    cwd: root,
+  }).decision, "deny", "old_string containing a checkpoint cannot grow to two");
+});
+
+test("ledger hygiene denies an Edit that crosses the line cap", async (t) => {
+  const root = await makeProject(t);
+  const nearCap = "# Ledger\n\n## Resume Checkpoint\n\n" + "filler\n".repeat(796) + "tail\n";
+  const ledger = await writeLedger(root, nearCap);
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "tail",
+      new_string: "tail\n" + "more\n".repeat(20),
+    },
+    cwd: root,
+  }).decision, "deny", "edit pushing past the cap is denied");
+});
+
+test("ledger hygiene allows unmodellable edits to fail open", async (t) => {
+  const root = await makeProject(t);
+  const ledger = await writeLedger(root, "# Ledger\n\n## Resume Checkpoint\n\nstate\n");
+  assert.equal(runGuard({
+    tool_name: "Edit",
+    tool_input: {
+      file_path: ledger,
+      old_string: "no-such-text",
+      new_string: "## Resume Checkpoint\n\nx",
+    },
+    cwd: root,
+  }).decision, "allow", "old_string absent from disk fails open (tool will fail naturally)");
+});

@@ -14,7 +14,7 @@ Never auto-proceed through design approval for new scope, always-Full safety wor
 
 ## 1. Load pack-aware state
 
-Identify the ledger from the topic, plan, Work ID, Delivery Pack ID, Crossing ID, gate ID, or review surface. If more than one could apply, ask rather than guess. Read the approved design, plan, ledger, bounded Resume checkpoint, and `docs/airlock/STATUS.md` before acting; legacy artifact paths remain readable. Then reconcile with:
+Identify the ledger from the topic, plan, Work ID, Delivery Pack ID, Crossing ID, gate ID, or review surface. If more than one could apply, ask rather than guess. Read the approved design, plan, the ledger's bounded Resume checkpoint plus only the sections it names (affected packs, open review rows, relevant Crossings), and `docs/airlock/STATUS.md` before acting — never the whole ledger; legacy artifact paths remain readable. Lifecycle and gate definitions live once in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`. Then reconcile with:
 
 - `git log --oneline <base-sha>..HEAD` and the relevant Crossing commits;
 - `git status --short`;
@@ -47,6 +47,8 @@ For every item, propose links to the affected **Delivery Pack**, optional **Cros
 Present numbered triage and stop for user approval before editing implementation or persisting feedback rows. In attended mode use `AskUserQuestion`; in unattended mode use the decision-parking rule above. Before that checkpoint, replace only the orchestrator-owned Resume checkpoint when the ledger is owned; record the exact approval needed and next action without treating proposed triage as approved history. After approval, persist rows with those links and refresh the checkpoint in place.
 
 At the start of each review round, increment `Age (rounds)` for every still-open MUST_FIX item and list all open MUST_FIX items first. A blocked row must name both the dependency and the dispatch/action that unblocks it.
+
+The default review-round cap is 3. On starting a fourth round for the same feedback batch, stop and obtain an explicit DECISION (attended, via `AskUserQuestion`) or park it (unattended) covering whether to continue, re-scope, or accept the residual risk with dispositions; do not silently iterate. Review dispatches use the reviewer context bundle defined in `plan` (candidate-pinned diff, changed-file list, evidence excerpts) instead of repository sweeps.
 
 Before any unrelated implementation while a MUST_FIX remains open, obtain explicit deferral approval and record the reason and disposition. In attended mode, use `AskUserQuestion`; in unattended mode, park the deferral decision, mark the affected package `blocked-on-user`, and continue only with a different unblocked package. Without approval, never defer the MUST_FIX.
 

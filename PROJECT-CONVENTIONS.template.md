@@ -17,6 +17,13 @@ Airlock classifies work as Quick, Compact, or Full. Quick uses at most one leaf 
 workflow artifacts. Compact normally uses one multipurpose `worker`. Full-lite prefers one worker per
 Crossing with required gates only. `/airlock:stop` ends command-activated mode.
 
+Usage policy: prototype/throwaway/exploratory work uses **no Airlock**; contained real changes use Compact;
+Full/irreversible/production work runs **on the Claude Code host only** (the guard hook is a Claude Code
+mechanism — OpenCode may serve as dispatched external worker, never as Full orchestrator).
+
+Session budgets are defaults for every Airlock session: at most 5 Crossings or the declared wall clock, then
+summarize and start a fresh session. Review rounds cap at 3 before an explicit continue decision.
+
 Only the main session delegates. Every worker is a leaf. Ask before each Fable leaf invocation, including
 when the main session uses Fable or an earlier Fable leaf was approved.
 

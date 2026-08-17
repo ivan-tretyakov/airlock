@@ -8,6 +8,18 @@ Airlock stays off after installation. Start it for one session with:
 /airlock:start <task>
 ```
 
+## When to use Airlock
+
+Airlock is a Full-work tool, not a way of working. Most sessions — prototypes, exploration, throwaway scripts — should not use it at all.
+
+| Work type | Harness | Process |
+|---|---|---|
+| Prototype / throwaway / exploration | any harness, any model | **No Airlock.** Don't invoke `/airlock:start`. |
+| Contained real change | either harness | Compact: one `worker`, 1–2 dispatches, no durable artifacts |
+| Full / irreversible / production | **Claude Code host only** (guard active). OpenCode participates as dispatched external worker, never as Full orchestrator | Full, with mechanical enforcement (ledger hygiene, budgets, review-round cap) |
+
+OpenCode-hosted sessions have no PreToolUse guard, so every Airlock guarantee there is prose-only; Full work belongs where the mechanism exists.
+
 ## Workflow Weight
 
 Airlock classifies task complexity separately from workflow weight.
@@ -110,6 +122,8 @@ The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until
 
 While a valid active v2 contract exists, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. Serialize all file-writing workers while this session-global contract is active; parallelize only read-only workers until per-worker contracts exist. Bash and PowerShell both block broad staging (including unscoped update staging for v2) and obvious out-of-contract redirection or write-cmdlet targets. File and shell targets resolve through their nearest existing ancestor so symlink/junction escapes are denied, and write-bearing compound commands with an unsafe directory change are denied. This common screening of shell writes is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior, including unscoped `git add -u` and `git add --update`. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 
+Ledger hygiene is the exception to contract-gated enforcement: it runs **globally** on the canonical `docs/airlock/ledger/**` and `docs/ledger/**` paths even when no dispatch contract exists, because the orchestrator edits the ledger precisely when no worker contract is active. It denies a Write with more than one `## Resume checkpoint` heading, an Edit whose projected file would hold more than one checkpoint or cross the 800-line cap, and any ledger write that keeps the file at or beyond the cap (an over-cap ledger accepts only a full shrink Write). Non-ledger paths, and Edits that cannot be modeled safely against the on-disk content, fail open.
+
 ## Context Discipline
 
 Command prompts state each rule once: `/airlock:start` carries the base rules (output, delegation, artifacts/cleanup) that the other commands reference, and the entire external-runtime contract — route records, the strict `airlock.external-agent/v2` manifest, dispatch, recovery, and the candidate audit — lives only in `references/EXTERNAL-RUNTIME.md`, loaded on demand for external routes. Native-only sessions never pay for it. After compaction, the `SessionStart` matcher `compact` injects one conditional reminder: active Full work rereads its design, plan, ledger Resume checkpoint, and `docs/airlock/STATUS.md`; other sessions ignore it. Pre-compaction refresh remains a prompt rule.
@@ -182,6 +196,8 @@ Design approval, always-Full safety work, merges to main, and publication are ha
 node --test scripts/plugin-policy.test.mjs
 node --test scripts/guard.test.mjs
 node --test scripts/run-external-agent.test.mjs
+node --test scripts/build-review-bundle.test.mjs
+python ~/.local/bin/ai-usage_test.py
 claude plugin validate .claude-plugin/plugin.json --strict
 claude plugin validate .claude-plugin/marketplace.json --strict
 ```
@@ -205,3 +221,5 @@ User messages use plain language while artifacts retain canonical terms for grep
 | test-fix-simplify | RED-GREEN-refactor |
 | all-round builder | worker |
 | questions waiting for you | DECISIONS.md |
+| production / irreversible work | Full work (Claude Code host only) |
+| reviewer's starting context | review bundle |

@@ -17,10 +17,7 @@ Explicit risk decisions still apply at every size; ceremony should not outweigh 
 
 ## Core units and lifecycle
 
-- A **Crossing** is one scope-audited, buildable commit with focused evidence. Under an approved external writer handoff, the launcher-sealed candidate precursor contains only exact product paths and is not a Crossing; the following orchestrator-owned process-artifact commit is the Crossing and references that candidate SHA/tree.
-- A **Delivery Pack** is one coherent outcome delivered by one or more contiguous Crossings. Finish its Crossing sequence before committing a Crossing from another pack.
-- A multi-Crossing Delivery Pack records why one Crossing is insufficient, dependencies, and a pack-level rollback strategy. Dependent Crossings are not promised to remain independently revertible.
-- Pack lifecycle is `planned → active → candidate → accepted`. `blocked`, `abandoned`, and `reverted` are exceptional terminal outcomes. Post-ship review lifecycle is orthogonal and never substitutes for pack lifecycle.
+Crossing, Delivery Pack, pack-lifecycle, gate-dimension, and Resume-checkpoint definitions live once in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`; load it now and apply it throughout. Operational consequences: finish a pack's Crossing sequence before committing a Crossing from another pack; record why one Crossing is insufficient, dependencies, and pack-level rollback when a pack has more than one; never let review state masquerade as pack lifecycle.
 
 ## Write the self-contained plan
 
@@ -52,24 +49,13 @@ Keep checkbox tasks small (typically 2–15 minutes). For behavior changes, foll
 
 ## Resume checkpoint
 
-The ledger is the only durable resume store. While work has an active pack, the orchestrator owns exactly one `## Resume checkpoint` section in the ledger. Replace its contents in place; never append checkpoint snapshots or create a parallel checkpoint file, message log, or state system.
+The ledger is the only durable resume store. While work has an active pack, the orchestrator owns exactly one `## Resume checkpoint` section in the ledger. Replace its contents in place; never append checkpoint snapshots or create a parallel checkpoint file, message log, or state system. The guard hook denies a second checkpoint and ledger writes past the line cap (see LIFECYCLE.md).
 
 Maintain `docs/airlock/STATUS.md` from `${CLAUDE_PLUGIN_ROOT}/references/STATUS.template.md` as the replace-in-place human dashboard. It links the design, plan, and ledger but never replaces the ledger Resume checkpoint as machine resume state.
 
-Keep the checkpoint bounded to these fields:
+Keep the checkpoint bounded to the canonical field list in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`.
 
-- **State:** `active` or `closed`.
-- **Updated:** ISO-8601 timestamp.
-- **Active pack / Crossing:** exact IDs.
-- **Completed:** concise completed tasks/Crossings.
-- **Changed paths:** current attributable paths, not the whole worktree.
-- **Fresh evidence:** current evidence IDs or concise command/tool references and results; for an external run, the summary facts required by `references/EXTERNAL-RUNTIME.md`.
-- **Blockers / decisions:** unresolved blockers and approved decisions.
-- **Retained evidence:** exact stable paths in the configured evidence home and their ledger/gate references.
-- **Temporary artifacts / processes:** exact task-owned paths/processes and cleanup state, including external sessions and processes when applicable.
-- **Next action:** one exact executable action.
-
-Refresh it after every subagent return, gate result, human checkpoint, and scope amendment, as well as before likely context compaction and before ending with unfinished work. A fresh session reads the approved design, plan, ledger, and Resume checkpoint before acting. Reference Crossing, gate, evidence, and Debug rows instead of copying history or long logs into the checkpoint.
+Refresh it after every subagent return, gate result, human checkpoint, and scope amendment, as well as before likely context compaction and before ending with unfinished work. A fresh session reads the approved design, plan, the ledger's single Resume checkpoint, and only the sections the checkpoint names (active pack, open gates, relevant Crossings) — never the whole ledger — before acting. Reference Crossing, gate, evidence, and Debug rows instead of copying history or long logs into the checkpoint.
 
 At pack acceptance, replace the checkpoint once more, set **State** to `closed`, and identify the final Crossing; do not delete it. A Light single-Crossing pack may initialize and close the same compact checkpoint in one session. A legacy ledger without this section remains valid; add it only when work is actively resumed or repaired, without retrofitting historical state.
 
@@ -126,13 +112,13 @@ For a plausibly relevant gate that is omitted, record one compact decision:
 |---|---|---|---|
 | `<pack-id>` | `<gate>` | not-required | `<risk-based reason>` |
 
-Applicability (`required` or `not-required`), runtime gate state (`pending`, `running`, `passed`, `failed`, `blocked`, `stale`), and an approved waiver are separate facts. A waiver needs approver, reason, and date; it never changes applicability or fabricates a `passed` state.
+Gate applicability, runtime state, waiver semantics, and the evidence-record field list are defined once in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`; a waiver needs approver, reason, and date, never changes applicability, and never fabricates a `passed` state. A substantive change to a candidate-bearing path stales affected evidence; ledger-only bookkeeping does not.
 
 If any task creates a temporary non-product artifact or process, cleanup is a required gate rather than a discretionary gate. Its pass condition names the exact task-owned paths/processes and proves they were removed or stopped. Add the gate through an approved plan/ledger amendment if the need is discovered during execution.
 
 Implementers run focused RED/GREEN and Crossing checks. After code freeze, an independent verifier context or specialized gate role runs the required final pack gates against one exact candidate without editing source during gate execution. A pre-ship independent-review gate is part of acceptance; post-ship feedback belongs to Airlock **`review`**.
 
-Each final gate will record either a full commit/tree or `base SHA + staged product-diff hash`, plus timestamp, effective runtime/agent/model/variant, command or MCP tool, environment, result, and artifact. External evidence also records the additional fields required by `references/EXTERNAL-RUNTIME.md`. Substantive changes to candidate-bearing paths make affected evidence `stale`.
+Each final gate records its evidence per the LIFECYCLE.md field list, including the exact candidate identity and the effective runtime/agent/model/variant that ran.
 
 ## Per-pack approval before execution
 
@@ -169,6 +155,8 @@ When the host supports hooks, additionally write the canonical v2 contract to `.
 Replace the example values with the task's absolute worker root, exact owned paths, explicit orchestrator bookkeeping paths, and an ISO-8601 UTC expiry no more than 2 hours after dispatch (for example, now + 2h). Keep `allowDispatch` false for a leaf. A read-only dispatch uses the minimal contract `ownedPaths: []` and `allowDispatch: false`. `actorMode` defaults to `agent-id`; if the session has never observed an `agent_id`-bearing hook input, explicitly select `single-actor`: worker rules apply to everyone and the guard fails closed if even the initiating dispatch cannot be distinguished. In that case, STOP and report the host incompatibility. While active, top-level calls may write only explicit `processPaths` and `.airlock/**`; worker calls may write only `ownedPaths` and are denied every process path and `.airlock/**`. The guard screens broad Git staging and obvious Bash/PowerShell writes. Serialize all file-writing workers while this session-global contract exists, parallelize only workers whose minimal read-only contracts are identical, and delete the contract after the return audit.
 
 Require the agent to classify every non-product artifact it creates per the base Artifacts-and-cleanup rules, returning retained-evidence references or exact temporary paths/processes and their cleanup state.
+
+**Reviewer context bundle.** For every independent-review or verification dispatch, build a deterministic review bundle with `scripts/build-review-bundle.mjs` and include it in the prompt instead of expecting the reviewer to sweep the repository. The bundle is generated **once from the frozen candidate** (never from an implementer summary), pinned to the exact candidate identity (commit/tree, or `base SHA + staged product-diff hash`), and contains the candidate-scoped diff, the changed-file list, focused evidence excerpts, and the relevant plan/spec sections — deterministically ordered and identified by a SHA-256 of its exact bytes. Cap the bundle at about 15K tokens (`--max-tokens`); if the mandatory diff plus changed-file list would overflow, the builder **fails closed** — narrow the candidate package rather than silently truncating evidence. Optional sections that overflow are recorded as explicit omissions in the bundle. Any candidate-bearing change makes the bundle stale: regenerate it, never patch it. The bundle is a task-owned temporary artifact: record its exact path and hash in the dispatch, and the orchestrator removes the artifact after the return audit per the base cleanup rules. Reviewers verify from these artifacts, not the implementer's conclusions; deeper file reads are allowed only inside the bundle's scope.
 
 For a launcher-sealed external writer route, follow `references/EXTERNAL-RUNTIME.md` for the dispatch, permissions, summary, recovery, and audit; restate in the worker prompt that its commit permission is `none`, the launcher seals the one exact candidate, and it must make no candidate-commit claim.
 

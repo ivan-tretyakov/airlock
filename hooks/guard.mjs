@@ -23,6 +23,166 @@ const DEFAULT_PROCESS_PATHS = [
   "docs/specs/**",
 ];
 
+// Ledger hygiene (Airlock 2.4, WS-1 1a). Deny-only: this hook never mutates
+// files. Rules apply to file-tool writes whose target is under a ledger
+// directory regardless of whether a dispatch contract exists — the
+// orchestrator edits the ledger precisely when no worker contract is active,
+// so hygiene must not be coupled to contract lifetime:
+//   1. a full Write whose content contains more than one
+//      "## Resume checkpoint" heading is denied (replace in place, never append);
+//   2. an Edit whose projected file would contain more than one checkpoint
+//      heading is denied (the on-disk content plus the old_string/new_string
+//      replacement is simulated, respecting replace_all);
+//   3. a ledger at or beyond LEDGER_LINE_CAP accepts only a full Write whose
+//      new content is below the cap (the archive-and-shrink cleanup path);
+//      all Edits and same-size-or-larger Writes are denied.
+// All ledger file reads fail open: an unreadable ledger is treated as absent.
+// An Edit that cannot be modeled safely (old_string not on disk, or empty)
+// also fails open — the tool call itself will then fail naturally.
+const LEDGER_LINE_CAP = 800;
+const LEDGER_PATTERNS = ["docs/airlock/ledger/**", "docs/ledger/**"];
+
+function countCheckpointHeadings(text) {
+  const matches = String(text).match(/^##[ \t]+resume[ \t]+checkpoint\b/gim);
+  return matches ? matches.length : 0;
+}
+
+function readLedgerState(absolutePath) {
+  try {
+    const content = readFileSync(absolutePath, "utf8");
+    return {
+      content,
+      lines: content.split(/\r\n|\r|\n/).length,
+      checkpoints: countCheckpointHeadings(content),
+    };
+  } catch {
+    return { content: "", lines: 0, checkpoints: 0 };
+  }
+}
+
+// Recognizes the two canonical ledger locations from the normalized absolute
+// path segments alone, so hygiene works without a contract root and survives
+// symlink/junction resolution (canonicalizeTarget resolves existing ancestors).
+function isLedgerPath(absoluteTarget) {
+  const segments = normalizeAbsolute(canonicalizeTarget(absoluteTarget)).split("/");
+  for (let i = 0; i + 1 < segments.length; i += 1) {
+    if (
+      segments[i] === "docs" &&
+      segments[i + 1] === "airlock" &&
+      segments[i + 2] === "ledger"
+    ) {
+      return true;
+    }
+    if (segments[i] === "docs" && segments[i + 1] === "ledger") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Simulates an Edit against the on-disk ledger content. Returns null when the
+// edit cannot be modeled deterministically (empty old_string, or old_string
+// absent from the on-disk content) — callers then fail open.
+function projectedEditContent(onDiskContent, toolInput) {
+  const oldString = toolInput?.old_string;
+  const newString = toolInput?.new_string ?? "";
+  if (typeof oldString !== "string" || oldString.length === 0) {
+    return null;
+  }
+  if (!onDiskContent.includes(oldString)) {
+    return null;
+  }
+  if (toolInput?.replace_all === true) {
+    return onDiskContent.split(oldString).join(newString);
+  }
+  return onDiskContent.replace(oldString, newString);
+}
+
+// Returns a deny reason string or null. Hygiene screening itself fails open
+// (returns null) on internal errors: it is an efficiency guard, not the
+// contract security boundary.
+function ledgerHygieneDenial(toolName, toolInput, absoluteTarget, contractRoot) {
+  try {
+    if (toolName !== "Write" && toolName !== "Edit" && toolName !== "NotebookEdit") {
+      return null;
+    }
+    if (contractRoot !== undefined) {
+      const ledgerPatterns = LEDGER_PATTERNS.map((entry) =>
+        absolutePattern(entry, contractRoot)
+      );
+      if (
+        pathAllowedAbsolute(canonicalizeTarget(absoluteTarget), ledgerPatterns)
+      ) {
+        return ledgerContentDenial(
+          toolName,
+          toolInput,
+          canonicalizeTarget(absoluteTarget),
+        );
+      }
+    }
+    if (!isLedgerPath(absoluteTarget)) {
+      return null;
+    }
+    return ledgerContentDenial(
+      toolName,
+      toolInput,
+      canonicalizeTarget(absoluteTarget),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function ledgerContentDenial(toolName, toolInput, canonicalTarget) {
+  const onDisk = readLedgerState(canonicalTarget);
+
+  if (toolName === "Edit") {
+    if (onDisk.lines >= LEDGER_LINE_CAP) {
+      return (
+        "Airlock ledger hygiene: this ledger is at or beyond the " +
+        LEDGER_LINE_CAP + "-line cap, so edits are blocked. Archive `## Completed`" +
+        " blocks to docs/airlock/archive/ and rewrite the ledger below the cap first."
+      );
+    }
+    const projected = projectedEditContent(onDisk.content, toolInput);
+    if (projected === null) {
+      return null;
+    }
+    const projectedLines = projected.split(/\r\n|\r|\n/).length;
+    if (projectedLines >= LEDGER_LINE_CAP) {
+      return (
+        "Airlock ledger hygiene: this edit keeps the ledger at or beyond the " +
+        LEDGER_LINE_CAP + "-line cap. Archive `## Completed` blocks to" +
+        " docs/airlock/archive/ and rewrite the shrunk ledger instead."
+      );
+    }
+    if (countCheckpointHeadings(projected) > 1) {
+      return (
+        "Airlock ledger hygiene: this edit would leave more than one" +
+        " `## Resume checkpoint` heading. Replace the checkpoint in place; do not append."
+      );
+    }
+    return null;
+  }
+
+  const content = toolInput?.content ?? toolInput?.new_source ?? "";
+  const newLines = String(content).split(/\r\n|\r|\n/).length;
+  if (newLines >= LEDGER_LINE_CAP) {
+    return (
+      "Airlock ledger hygiene: this Write keeps the ledger at or beyond the " +
+      LEDGER_LINE_CAP + "-line cap. Archive `## Completed` blocks to" +
+      " docs/airlock/archive/ and write the shrunk ledger instead."
+    );
+  }
+  if (countCheckpointHeadings(content) > 1) {
+    return (
+      "Airlock ledger hygiene: the content contains more than one" +
+      " `## Resume checkpoint` heading. Replace the checkpoint in place; do not append."
+    );
+  }
+  return null;
+}
+
 function allow() {
   process.exit(0);
 }
@@ -563,6 +723,31 @@ function main() {
   const toolInput = input?.tool_input ?? {};
   const workingDirectory = input?.cwd || process.cwd();
 
+  // Global ledger hygiene runs before contract discovery. The orchestrator
+  // edits the ledger precisely when no worker contract exists, so a missing,
+  // malformed, or expired contract must not disable checkpoint and line-cap
+  // enforcement on canonical ledger paths. Non-ledger paths still fail open.
+  const toolFilePath = toolInput?.file_path ?? toolInput?.notebook_path ?? "";
+  if (toolFilePath && (toolName === "Edit" || toolName === "Write" || toolName === "NotebookEdit")) {
+    try {
+      const globalTarget = path.resolve(workingDirectory, String(toolFilePath));
+      if (isLedgerPath(globalTarget)) {
+        const globalDenial = ledgerContentDenial(
+          toolName,
+          toolInput,
+          canonicalizeTarget(globalTarget),
+        );
+        if (globalDenial) {
+          deny(globalDenial);
+          return;
+        }
+      }
+    } catch {
+      // Hygiene screening fails open on internal errors; fall through so a
+      // valid active v2 contract still fails closed via the main path.
+    }
+  }
+
   const located = findContract(workingDirectory);
   if (!located) {
     allow();
@@ -679,6 +864,16 @@ function main() {
       );
       return;
     }
+    const v2LedgerDenial = ledgerHygieneDenial(
+      toolName,
+      toolInput,
+      v2Verdict.target,
+      contractRoot,
+    );
+    if (v2LedgerDenial) {
+      deny(v2LedgerDenial);
+      return;
+    }
     allow();
     return;
   }
@@ -720,6 +915,16 @@ function main() {
     deny(
       `Airlock contract active: ${normalize(relative)} is not in ownedPaths (.airlock/contract.json). STOP and report instead of editing it; a blocked task reported honestly is a success.`,
     );
+    return;
+  }
+  const ledgerDenial = ledgerHygieneDenial(
+    toolName,
+    toolInput,
+    absolute,
+    located.root,
+  );
+  if (ledgerDenial) {
+    deny(ledgerDenial);
     return;
   }
   allow();
