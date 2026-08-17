@@ -38,9 +38,17 @@ Check whether `.airlock/config.json` exists before reading it. When absent, reso
 
 `native` uses only the current host and its leaf subagents. `opencode` uses the deterministic external launcher only on a local host with Node.js, Git, and OpenCode available; before any external work, read `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` — the canonical external contract. Cowork web/mobile and any host without those executables must stop with the missing capability; never silently fall back or install dependencies.
 
+## Host harness gate (Claude-only Full)
+
+Full work — the Full workflow and any always-Full safety class — runs **on the Claude Code host only**, where the PreToolUse guard hook is loaded. On any other host (OpenCode, Cowork web/mobile, or a host without the guard), a task that classifies as **Full** is `BLOCKED`, never downgraded to Compact and never executed inline. State the cause (host lacks the guard), the impact (Full ceremony enforcement is unavailable), and the exact next action: rerun the task from Claude Code (`/airlock:start`), or submit it to a Claude-hosted session. Do not proceed with Full work from a non-Claude host under any override.
+
+A Claude-hosted Full session may select `runtime: opencode` and dispatch OpenCode as an external **leaf worker**; that is Full orchestration on Claude Code with OpenCode as the leaf, and remains legal. The `runtime` option never changes which host runs the ceremony — only the leaf that executes the task. This gate is a host capability check, not a `runtime` routing decision.
+
 ## Classify
 
 Classify task complexity and workflow weight separately. State the result in one line: `Airlock: <Quick|Compact|Full> (<reason>), <native|opencode>.` In unattended mode state `Airlock: <weight>, <native|opencode>, unattended.` Do not ask the user to approve `auto` classification; the user may override it.
+
+If the task is exploratory, throwaway, or prototype-class work with no irreversible surface, recommend NOT using Airlock for it and stop after that recommendation: native execution without Airlock is cheaper and equally safe for that class. Airlock is a Full-work tool, not a way of working.
 
 Before classification, if this task or its plan contains a browser gate, load the matching host config/overlay and run the stored backend and auth-signal preflight. A host mismatch is BLOCKED with `re-run /airlock:setup on this host`; any backend or auth failure is BLOCKED with the configured `refreshCommand` verbatim. Missing `browser` in a valid v1 or v2 config means no browser gates are configured.
 
@@ -52,9 +60,13 @@ Before classification, if this task or its plan contains a browser gate, load th
 
 Ambiguity about intent or blast radius escalates one level. Security, credentials, destructive actions, migrations, production/live mutations, and irreversible work always use Full. A user override cannot remove a required safety confirmation.
 
+A Full classification on a host without the Claude Code guard hook is `BLOCKED` per the **Host harness gate**: stop and require a rerun from Claude Code. Never downgrade Full to Compact as a workaround; Full work done without the guard is not done under Airlock.
+
 Publication means directly mutating what users consume, such as pushing a tag consumers auto-pull, publishing to a marketplace or registry, or deploying. The mutating step always requires an explicit DECISION approval, while the surrounding work classifies on its own merits. A release PR merged by the user is Compact by default: version bumps, changelog/README updates, validation, and opening the PR use the merge as the approval gate. After merge, tag or publish only behind a second DECISION. A release containing migrations, credential changes, or irreversible external state remains Full.
 
 Dispatch budgets are guidelines: Quick uses 0-1 dispatch; Compact uses 1-2 (the `worker` plus optional independent verify); Full-lite uses at most 3 dispatches per Crossing; Full uses the approved specialist plan. Prefer `worker` over an investigate -> code-* -> verify chain unless investigation output is a user decision input, the work class is Critical, or a gate requires independence. Specialist leaves remain correct for Critical work and genuinely separable phases. Exceeding a budget is allowed only after one PROGRESS line states the reason.
+
+Session budgets are the default for every Airlock session, attended or unattended: at most 5 Crossings (override with `--max-crossings N`) and any declared wall-clock limit. On exhaustion, refresh STATUS and the ledger Resume checkpoint, summarize state and next action, and recommend a fresh session instead of continuing. Mega-sessions are opt-in, never the ambient failure mode.
 
 For a multi-item feedback or bug list on Quick or Compact work, run the `review` triage classes in-chat before fixing anything: classify each item MUST_FIX, SHOULD_FIX, PARK, or OUT_OF_SCOPE, present the numbered batch for the user's confirmation, then fix in severity order. No ledger, rows, or repair packs — the triage lives only in chat.
 
@@ -72,7 +84,7 @@ If a required agent type or delegation capability is unavailable, STOP and repor
 
 Inline execution is allowed only for Quick work. Browser driving, git history surgery, and environment repair are implementation work during Compact or Full work: delegate them or STOP.
 
-For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` directly. For Quick work, derive the exact manifest scope from the user's request, use task-owned Quick identifiers where the strict schema requires pack or Crossing identifiers, and create no workflow artifacts. For Full work, follow the canonical Full commands. The OpenCode worker remains a leaf with `task` and interactive questions denied. External execution is never selected merely because it is configured: use it only after Airlock is explicitly started for the task.
+For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` directly. For Quick work, derive the exact manifest scope from the user's request, use task-owned Quick identifiers where the strict schema requires pack or Crossing identifiers, and create no workflow artifacts. For Full work on a Claude Code host, follow the canonical Full commands; on any other host, Full work is BLOCKED by the Host harness gate. The OpenCode worker remains a leaf with `task` and interactive questions denied. External execution is never selected merely because it is configured: use it only after Airlock is explicitly started for the task.
 
 ## Unattended mode
 

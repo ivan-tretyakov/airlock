@@ -20,6 +20,7 @@ import { promisify } from "node:util";
 
 import {
   AIRLOCK_HEADINGS,
+  assertBudgetApprovals,
   LEGACY_MANIFEST_SCHEMA_ID,
   MANIFEST_SCHEMA_ID,
   buildChildEnvironment,
@@ -175,7 +176,7 @@ function makeManifest(paths, overrides = {}) {
   const route = {
     agent: "airlock-worker",
     model: "openai/gpt-5.4-mini",
-    variant: "none",
+    variant: "medium",
     targetDirectory: paths.targetDirectory,
     branch: "main",
     ...overrides.route,
@@ -260,7 +261,7 @@ function makeWriterManifest(paths, overrides = {}) {
   const route = {
     agent: "airlock-worker",
     model: "openai/gpt-5.4-mini",
-    variant: "none",
+    variant: "medium",
     targetDirectory: paths.targetDirectory,
     branch: "main",
     ...overrides.route,
@@ -450,7 +451,7 @@ function sanitizedExport({
   provider = "openai",
   model = "gpt-5.4-mini",
   agent = "airlock-worker",
-  variant = "none",
+  variant = "medium",
 } = {}) {
   return Buffer.from(
     JSON.stringify({
@@ -2241,7 +2242,7 @@ test("successful run validates route, evidence, identity, and exact cleanup", as
     agent: "airlock-worker",
     provider: "openai",
     model: "gpt-5.4-mini",
-    variant: "none",
+    variant: "medium",
     proof: "sanitized-export+argument-array",
   });
   assert.deepEqual(summary.session, {
@@ -2405,7 +2406,7 @@ test("sanitized export parser accepts observed and nested identity variants", ()
     provider: "openai",
     model: "gpt-5.4-mini",
     agent: "airlock-worker",
-    variant: "none",
+    variant: "medium",
     assistant: true,
   });
 
@@ -2577,7 +2578,7 @@ test("argument array and child environment preserve route but expose no secret v
   assert.equal(output.trim().split("\n").length, 1);
   assert.ok(run);
   assert.equal(run.args.includes("--auto"), false);
-  assert.equal(run.args[run.args.indexOf("--variant") + 1], "none");
+  assert.equal(run.args[run.args.indexOf("--variant") + 1], "medium");
   assert.equal(run.args[run.args.indexOf("--agent") + 1], "airlock-worker");
   assert.equal(run.args[run.args.indexOf("--model") + 1], "openai/gpt-5.4-mini");
   assert.equal(run.args[run.args.indexOf("--dir") + 1], paths.targetDirectory);
@@ -2861,5 +2862,184 @@ test("direct-execution path matching is case-insensitive only on Windows", () =>
       "linux",
     ),
     false,
+  );
+});
+
+test("high-effort route variant requires explicit highEffortApproved", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  manifest.route.variant = "high";
+  manifest.prompt = manifest.prompt.replace(
+    /variant [A-Za-z0-9._:\/-]+/,
+    "variant high",
+  );
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_effort_not_approved",
+  );
+
+  manifest.highEffortApproved = true;
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+});
+
+test("unknown and non-allowlisted effort values are rejected even when approved", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  for (const badVariant of ["ultra", "max", "turbo", "godmode"]) {
+    manifest.route.variant = badVariant;
+    manifest.prompt = manifest.prompt.replace(
+      /variant [A-Za-z0-9._:\/-]+/,
+      `variant ${badVariant}`,
+    );
+    manifest.highEffortApproved = true;
+    assert.throws(
+      () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+      (error) => error.code === "manifest_effort_unknown",
+      `variant ${badVariant} is not an allowlisted effort`,
+    );
+  }
+});
+
+test("hidden effort inside opencode.config requires explicit highEffortApproved", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t, {
+    manifest: {
+      config: { agent: { build: { variant: "high" } } },
+    },
+  });
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_effort_not_approved",
+  );
+
+  manifest.highEffortApproved = true;
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+});
+
+test("legacy manifests are subject to the effort allowlist too", async (t) => {
+  const { paths } = await makeWriterRepository(t);
+  const legacy = makeManifest(paths, { route: { variant: "max" } });
+  assert.throws(
+    () => validateManifest(legacy, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_effort_unknown",
+  );
+});
+
+test("effort allowlist follows the selected provider and permits declared custom variants", () => {
+  assert.doesNotThrow(() =>
+    assertBudgetApprovals({
+      route: { model: "anthropic/claude-3", variant: "max" },
+      opencode: { config: {} },
+      highEffortApproved: true,
+    }),
+  );
+  assert.doesNotThrow(() =>
+    assertBudgetApprovals({
+      route: { model: "anthropic/claude-3", variant: "thinking" },
+      opencode: {
+        config: {
+          provider: {
+            anthropic: {
+              models: {
+                "claude-3": { variants: { thinking: { reasoningEffort: "high" } } },
+              },
+            },
+          },
+        },
+      },
+      highEffortApproved: true,
+    }),
+  );
+});
+
+test("budget flags must be boolean true and non-true values fail", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  manifest.wallClockApproved = "yes";
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_budget_invalid",
+  );
+  manifest.wallClockApproved = true;
+  manifest.highEffortApproved = 1;
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_budget_invalid",
+  );
+});
+
+test("wall clock over 45 minutes rejects without explicit approval and passes with it", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  manifest.timeoutMs = 3_600_000;
+  assert.throws(
+    () => validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    (error) => error.code === "manifest_timeout_not_approved",
+  );
+
+  manifest.wallClockApproved = true;
+  const runtime = fakeWriterRuntime(manifest);
+  const summary = await executeWriterManifest(
+    paths,
+    manifest,
+    runtime.dependencies,
+  );
+  assert.equal(summary.selectedRoute.wallClockMs, 3_600_000);
+  assert.equal(summary.selectedRoute.wallClockApproved, true);
+
+  const workerRun = runtime.calls.find((call) => call.purpose === "worker-run");
+  assert.ok(workerRun);
+  assert.equal(workerRun.timeoutMs, 3_600_000, "approved timeout passes to the worker");
+});
+
+test("blocked validation summaries retain safe parsed route context", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  manifest.timeoutMs = 3_600_000;
+
+  const summary = await executeWriterManifest(paths, manifest);
+
+  assert.equal(summary.status, "blocked");
+  assert.equal(summary.classification, "manifest_timeout_not_approved");
+  assert.deepEqual(summary.selectedRoute, {
+    runtime: "opencode",
+    agent: "airlock-worker",
+    model: "openai/gpt-5.4-mini",
+    variant: "medium",
+    targetDirectory: paths.targetDirectory,
+    branch: "main",
+    wallClockMs: 45 * 60_000,
+    wallClockApproved: false,
+    highEffortApproved: false,
+  });
+});
+
+test("timeout at or below 45 minutes passes without approval and passes exact value", async (t) => {
+  const { paths, manifest } = await makeWriterRepository(t);
+  manifest.timeoutMs = 45 * 60_000;
+  assert.equal(
+    validateManifest(manifest, { manifestPath: paths.manifestPath }),
+    manifest,
+  );
+
+  const runtime = fakeWriterRuntime(manifest);
+  const summary = await executeWriterManifest(
+    paths,
+    manifest,
+    runtime.dependencies,
+  );
+  assert.equal(summary.selectedRoute.wallClockMs, 45 * 60_000);
+  assert.equal(summary.selectedRoute.wallClockApproved, false);
+  const workerRun = runtime.calls.find((call) => call.purpose === "worker-run");
+  assert.equal(workerRun.timeoutMs, 45 * 60_000);
+});
+
+test("manifest schema metadata exports the optional budget keys", async () => {
+  const { MANIFEST_SCHEMA, LEGACY_MANIFEST_SCHEMA, OPTIONAL_BUDGET_KEYS } =
+    await import("../scripts/run-external-agent.mjs");
+  assert.deepEqual(MANIFEST_SCHEMA.optionalKeys.root, [...OPTIONAL_BUDGET_KEYS]);
+  assert.deepEqual(
+    LEGACY_MANIFEST_SCHEMA.optionalKeys.root,
+    [...OPTIONAL_BUDGET_KEYS],
   );
 });

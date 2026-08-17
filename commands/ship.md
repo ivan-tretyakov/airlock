@@ -8,10 +8,9 @@ Nothing crosses on assertion. A **Crossing** is one scope-audited, buildable com
 
 ## 1. Load the planned boundary
 
-- Read the approved design, plan, ledger, current Resume checkpoint, and `docs/airlock/STATUS.md` before acting. The ledger remains the only durable machine resume store; STATUS is the human view. Existing legacy artifact paths remain readable.
+- Read the approved design, plan, the ledger's single Resume checkpoint plus only the sections it names (active pack, open gates, relevant Crossings), and `docs/airlock/STATUS.md` before acting — never the whole ledger. The ledger remains the only durable machine resume store; STATUS is the human view. Existing legacy artifact paths remain readable. Lifecycle and gate definitions live once in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`.
 - Identify the approved Delivery Pack, next Crossing, exact owned paths, candidate-bearing paths, process artifacts, and required checks/gates. Do not combine packs or skip a Crossing ID.
 - Confirm this Crossing leaves a buildable state. A multi-Crossing pack owns rollback at pack level; do not claim each dependent commit remains independently revertible.
-- Pack lifecycle is `planned → active → candidate → accepted`, with `blocked`, `abandoned`, and `reverted` as exceptional terminal outcomes. Review lifecycle is a separate ledger field.
 
 ## 2. Protect state, then seal the candidate
 
@@ -55,13 +54,7 @@ For the final Crossing:
 3. Reuse fresh evidence for the same candidate. Rerun only missing/stale gates.
 4. Keep functional, visual, live-integration, and cleanup results separate. Mutating validation needs an approved throwaway target and cleanup evidence.
 
-Every gate has three independent dimensions:
-
-- **Applicability:** `required` or `not-required`.
-- **Gate state:** `pending`, `running`, `passed`, `failed`, `blocked`, or `stale`.
-- **Waiver:** approver, reason, and date. A waiver does not change applicability or turn a gate state into `passed`.
-
-Each evidence record identifies: gate ID, exact candidate, timestamp, executor host role and effective runtime/agent/model/variant, command or MCP tool, environment/target, result, and artifact reference. External evidence also records the additional fields required by `references/EXTERNAL-RUNTIME.md`. A substantive code, test, configuration, generated-artifact, or cited-spec change stales every affected gate; a ledger-only bookkeeping edit does not. For the normal staged path, the resulting commit/tree becomes the candidate identity; for an external handoff, the launcher-sealed precursor SHA/tree remains the candidate and the orchestrator Crossing commit is recorded separately. Retain any pre-commit base/diff hash that gates actually exercised.
+Gate applicability, state, waiver semantics, and the evidence-record field list are defined once in `${CLAUDE_PLUGIN_ROOT}/references/LIFECYCLE.md`. Each evidence record follows that list, including the exact candidate identity and, for an external handoff, the additional fields required by `references/EXTERNAL-RUNTIME.md`. For the normal staged path, the resulting commit/tree becomes the candidate identity; for an external handoff, the launcher-sealed precursor SHA/tree remains the candidate and the orchestrator Crossing commit is recorded separately. Retain any pre-commit base/diff hash that gates actually exercised.
 
 If a required gate fails after launcher sealing, or a candidate-bearing change makes its evidence stale, mark the gate/evidence and pack's current candidate `failed` or `stale`, and record it under checkpoint **Fresh evidence** and **Blockers / decisions**; do not add a Crossing entry or create the orchestrator Crossing commit. With explicit approval, a fresh manifest/launcher run starts from current `HEAD` and may seal exactly one successor candidate, or the user may approve an explicit revert commit. Preserve prior candidates and evidence; never silently reset, rebase, amend, or revert them.
 
@@ -109,7 +102,7 @@ After each gate or cleanup result and before any unfinished return, replace the 
 
 At every package acceptance and before any unfinished session end, replace `docs/airlock/STATUS.md` in place from current ledger state; never append snapshots and keep only the five newest Recently closed rows. Before compaction, refresh both STATUS and the ledger Resume checkpoint.
 
-Archive the defining plan and specification under `docs/airlock/archive/YYYY-MM/` only when all work packages they define are accepted. If any defined package is planned, active, candidate, blocked, abandoned, or reverted, keep that plan/spec active in `docs/airlock/plans/` and `docs/airlock/specs/`.
+Archive the defining plan and specification under `docs/airlock/archive/YYYY-MM/` only when all work packages they define are accepted. If any defined package is planned, active, candidate, blocked, abandoned, or reverted, keep that plan/spec active in `docs/airlock/plans/` and `docs/airlock/specs/`. At pack acceptance, when the ledger passes roughly 500 lines, also move its `## Completed` blocks to `docs/airlock/archive/YYYY-MM/<work-id>-completed.md` with one-line references left behind — performed as one full ledger Write below the line cap; the guard hook blocks ledger writes that keep a ledger at or beyond the cap.
 
 Stage the ledger explicitly, rerun `git diff --cached --name-status`, and recompute the candidate hash if any candidate-bearing path changed. Process-only ledger staging does not stale evidence. For an external handoff, stage only orchestrator-owned process artifacts in the Crossing commit, keep launcher-sealed product paths clean, and reference the audited launcher candidate SHA/tree.
 

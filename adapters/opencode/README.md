@@ -69,14 +69,16 @@ The worker is a user-account process with advisory model instructions plus deter
 
 This repository's `.opencode/command/` directory supplies explicit commands that read the canonical command files:
 
-- `/airlock-start`
+- `/airlock-start` — OpenCode host; Quick and Compact only. Full-class tasks are `BLOCKED` per the Host harness gate.
 - `/airlock-stop`
 - `/airlock-setup`
-- `/airlock-brainstorm`
-- `/airlock-plan`
-- `/airlock-ship`
-- `/airlock-review`
-- `/airlock-debug`
+- `/airlock-brainstorm` — blocked on OpenCode (Full work requires the Claude Code host)
+- `/airlock-plan` — blocked on OpenCode (Full work requires the Claude Code host)
+- `/airlock-ship` — blocked on OpenCode (Full work requires the Claude Code host)
+- `/airlock-review` — blocked on OpenCode (Full work requires the Claude Code host)
+- `/airlock-debug` — Quick/Compact debugging only; Full-class debugging is blocked
+
+OpenCode never runs Full ceremony. Full work runs on the Claude Code host only (where the guard hook is loaded); OpenCode participates as a dispatched external leaf worker from a Claude-hosted Full session. The `airlock-*` commands here declare their host and block rather than downgrade.
 
 Restart OpenCode after changing commands or configuration because they are loaded at startup. Airlock remains inactive until `/airlock-start` is invoked.
 
