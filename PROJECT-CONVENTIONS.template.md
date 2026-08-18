@@ -32,6 +32,7 @@ when the main session uses Fable or an earlier Fable leaf was approved.
 - **Focused test command:** `<e.g. npm test -- path / pytest tests/x.py>`
 - **Full test command:** `<e.g. npm test / pytest -q / ./run.ps1 -Tests>`. State whether every Crossing requires it.
 - **Typecheck / lint / build:** `<exact commands, or not applicable>`
+- **Deterministic check commands:** `<exact unit, typecheck, lint, and build commands the orchestrator may run inline>`
 - **Run the app:** `<e.g. npm run dev / ./run.ps1>`
 - **Artifact homes:** current dashboard at `<docs/airlock/STATUS.md>`, designs in `<docs/airlock/specs/>`, plans in `<docs/airlock/plans/>`, ledgers in `<docs/airlock/ledger/>`, accepted plan/spec archives in `<docs/airlock/archive/YYYY-MM/>`; read legacy `<docs/specs/>`, `<docs/plans/>`, and `<docs/ledger/>` when present
 - **Review surface:** `<e.g. local diff only / a PR per piece of work>`
@@ -74,7 +75,7 @@ when the main session uses Fable or an earlier Fable leaf was approved.
   docs/generation-log.jsonl (disclosure requirement); commit each asset with its import sidecar>`
 - **Branch + push policy:** `<e.g. work lands directly on main; commit as part of the task; push only when
   asked>`
-- **Release flow:** `<bump plugin.json + marketplace.json -> update changelog/README -> run the three test suites + claude plugin validate --strict for both manifests -> branch + PR (DECISION: link) -> after user merge, tag/publish only behind a second DECISION>`
+- **Release flow:** `<bump plugin.json + marketplace.json -> update changelog/README -> run the four test suites + claude plugin validate --strict for both manifests -> branch + PR (DECISION: link) -> after user merge, tag/publish only behind a second DECISION>`
 - **Release escalation:** `<migrations, credential changes, irreversible external state, and direct publication remain Full or explicitly gated>`
 - **Commit message convention:** `<e.g. conventional commits; end with the Co-Authored-By trailer>`
 - **Parallel sessions:** `<e.g. two sessions often share one checkout → every plan MUST declare a disjoint

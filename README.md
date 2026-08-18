@@ -30,9 +30,22 @@ Airlock classifies task complexity separately from workflow weight.
 | **Compact** | Standard | Short in-chat scope, one multipurpose `worker` for investigation + implementation + self-verification, and only risk-relevant independent verification. |
 | **Full** | Complex or Critical | Subagent-only implementation under explicit design, plan, ledger, Crossing, and selected evidence gates. Starts at the Full-lite shape (one pack, required gates only) and escalates only when scale demands it. |
 
-Ambiguous work escalates one level. Security-sensitive, destructive, migration, production/live, and irreversible work always uses Full.
+Escalate only for a named irreversible or cross-cutting surface; approach uncertainty gets a cheap investigation, not a heavier implementer. Security-sensitive, destructive, migration, production/live, and irreversible work always uses Full.
 
 Dispatch budgets are guidelines: Quick 0-1, Compact 1-2, Full-lite at most 3 per Crossing, and Full as planned. Airlock prefers `worker` over an investigate -> code-* -> verify chain unless a user decision, Critical work, or an independence gate requires specialists.
+
+### Right-weighting
+
+| Class | Testable rule |
+|---|---|
+| Light | One file or a mechanical, fully specified change with an obvious check. |
+| Standard | Contained implementation with clear seams and tests. This is the default. |
+| Complex | At least three modules, a shared interface other code depends on, or an unknown fix location. |
+| Critical | Irreversible work, credentials/secrets/security boundaries, a published contract others consume, or expensive unwind. |
+
+If no Complex or Critical criterion can be named, route the work as Standard. Per Delivery Pack, use at most one `code-critical` and two `code-complex` workers by default; exceeding either weight budget requires a PROGRESS line naming the criterion.
+
+Required gate rows declare who runs each check: `implementer` for a worker's own evidence, `orchestrator-inline` for an orchestrator command, or `independent` for a separate frozen-candidate review. Deterministic tests, typecheck, lint, and builds use the first two modes by default. Independent verification is pack-level by default and is reserved for judgment or final-pack gates.
 
 ### Release lane
 
@@ -223,3 +236,5 @@ User messages use plain language while artifacts retain canonical terms for grep
 | questions waiting for you | DECISIONS.md |
 | production / irreversible work | Full work (Claude Code host only) |
 | reviewer's starting context | review bundle |
+| who runs the check | Executed by |
+| expensive workers allowed per package | weight budget |

@@ -293,10 +293,28 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.4.0");
+  assert.equal(plugin.version, "2.5.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
+});
+
+test("core Full-flow prompt surface has a deliberate ceiling", async () => {
+  // This 80 KB LF-normalized ceiling stops the 66.3K -> 73.8K -> 78.4K prompt-growth trend.
+  const coreFullFlow = [
+    "commands/start.md",
+    "commands/plan.md",
+    "commands/ship.md",
+    "commands/review.md",
+    "agents/orchestrator.md",
+    "references/LIFECYCLE.md",
+  ];
+  const contents = await Promise.all(coreFullFlow.map(source));
+  const bytes = contents.reduce(
+    (total, text) => total + Buffer.byteLength(text.replaceAll("\r\n", "\n"), "utf8"),
+    0,
+  );
+  assert.ok(bytes <= 80_000, `core Full-flow prompt surface is ${bytes} bytes; ceiling is 80000`);
 });
 
 test("orchestrator loads start.md via the plugin root, not a bare relative path", async () => {
@@ -518,6 +536,50 @@ test("adaptive ceremony uses the multipurpose worker within explicit dispatch bu
   }
 });
 
+test("right-weighting defaults down and keeps independent verification pack-level", async () => {
+  const [start, plan, ship, orchestrator, complex, critical, lifecycle, adapter] = await Promise.all([
+    source("commands/start.md"),
+    source("commands/plan.md"),
+    source("commands/ship.md"),
+    source("agents/orchestrator.md"),
+    source("agents/code-complex.md"),
+    source("agents/code-critical.md"),
+    source("references/LIFECYCLE.md"),
+    source("adapters/opencode/README.md"),
+  ]);
+
+  for (const [filename, text] of [["start", start], ["orchestrator", orchestrator]]) {
+    assert.match(text, /(?:name|named).*irreversible or cross-cutting surface/i, filename + ": bounded escalation");
+    assert.match(text, /(?:uncertainty is about approach|approach uncertainty).*(?:investigate|read-only).*worker/i, filename + ": investigate approach uncertainty");
+    assert.match(text, /unnamed uncertainty.*not grounds for escalation/i, filename + ": unnamed uncertainty defaults down");
+    assert.match(text, /at most one `code-critical`.*at most two `code-complex`/i, filename + ": weight budget");
+    assert.match(text, /weight budgets?.*(?:additional|separate).*count budgets?/i, filename + ": independent budgets");
+  }
+
+  assert.match(plan, /If you cannot name which criterion is met, the class is Standard/i);
+  assert.match(plan, /touches at least three modules/i);
+  assert.match(plan, /shared interface other code depends on/i);
+  assert.match(plan, /published contract others consume/i);
+  assert.match(plan, /route row claiming Complex or Critical without its named criterion in `Why \/ criterion \/ independence` is invalid/i);
+  assert.match(plan, /Selected leaf \/ runtime.*Selected model \/ variant.*Why \/ criterion \/ independence/i);
+  assert.doesNotMatch(plan, /\| Pack \/ Crossing \/ task \|[^\r\n]*\| Named criterion \|/i);
+  assert.match(plan, /pass the selected model with the individual `Agent` dispatch/i);
+  assert.match(plan, /OpenCode.*resolved model\/variant matches the approved route row/i);
+  assert.match(frontmatter(complex), /^model: sonnet$/m);
+  assert.match(frontmatter(critical), /^model: opus$/m);
+
+  assert.match(plan, /\| Gate ID .*Executed by.*Execution reason/is);
+  assert.doesNotMatch(plan, /\| Gate ID .*Executor host role/is);
+  assert.match(plan, /`implementer`.*`orchestrator-inline`.*`independent`/is);
+  assert.match(plan, /Deterministic checks.*implementer.*orchestrator-inline/i);
+  assert.match(plan, /per-Crossing gate marked `independent` requires a one-line reason/i);
+  for (const [filename, text] of [["plan", plan], ["ship", ship], ["lifecycle", lifecycle]]) {
+    assert.match(text, /Independent verification is .*pack-level by default/i, filename + ": pack-level default");
+  }
+  assert.match(ship, /Do not dispatch a verifier per Crossing unless.*`independent`.*stated reason/i);
+  assert.match(adapter, /do not declare a project `verify` subagent merely for deterministic checks/i);
+});
+
 test("release work is Compact until a direct publication mutation", async () => {
   const [start, orchestrator, readme, conventions] = await Promise.all([
     source("commands/start.md"),
@@ -533,7 +595,7 @@ test("release work is Compact until a direct publication mutation", async () => 
     assert.match(text, /migrations.*credential.*irreversible.*Full/is, filename);
   }
   assert.match(conventions, /plugin\.json.*marketplace\.json.*changelog.*README/is);
-  assert.match(conventions, /three test suites.*claude plugin validate.*both manifests/is);
+  assert.match(conventions, /four test suites.*claude plugin validate.*both manifests/is);
   assert.match(conventions, /branch.*PR.*DECISION.*after.*merge.*tag.*publish.*second DECISION/is);
 });
 
