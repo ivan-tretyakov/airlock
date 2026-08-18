@@ -16,9 +16,9 @@ Airlock is a Full-work tool, not a way of working. Most sessions — prototypes,
 |---|---|---|
 | Prototype / throwaway / exploration | any harness, any model | **No Airlock.** Don't invoke `/airlock:start`. |
 | Contained real change | either harness | Compact: one `worker`, 1–2 dispatches, no durable artifacts |
-| Full / irreversible / production | **Claude Code host only** (guard active). OpenCode participates as dispatched external worker, never as Full orchestrator | Full, with mechanical enforcement (ledger hygiene, budgets, review-round cap) |
+| Full / irreversible / production | **Guard-capable host only.** Claude Code qualifies with its PreToolUse hook; OpenCode qualifies with the reviewed guard plugin reporting `fullCapable: true`. OpenCode may also be an external worker. | Full, with mechanical enforcement (ledger hygiene, budgets, review-round cap) |
 
-OpenCode-hosted sessions have no PreToolUse guard, so every Airlock guarantee there is prose-only; Full work belongs where the mechanism exists.
+An OpenCode host without the reviewed guard plugin is prose-only and cannot run Full work. A user override never bypasses a failed guard-capability check.
 
 ## Workflow Weight
 
@@ -131,7 +131,7 @@ Runtime resolution is:
 
 ## Enforcement Hooks
 
-The plugin ships a PreToolUse guard hook (`hooks/guard.mjs`) that is inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before every dispatch. Read-only leaves use `ownedPaths: []` and `allowDispatch: false`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, `allowDispatch`, and `actorMode`: `agent-id` (default) or `single-actor`. The safest fallback on a host that never emits `agent_id` is `single-actor`, which applies worker rules to everyone. README smoke test: write a contract, verify an orchestrator process-path edit and a worker owned-path edit both succeed under `agent-id`; repeat with `single-actor` expecting worker scope only.
+The canonical guard is `hooks/guard.mjs`. Claude Code invokes it through a PreToolUse hook. OpenCode invokes the same policy through `.opencode/plugins/airlock-guard.js`, which maps `edit`, `write`, `apply_patch`, `bash`, and `task` calls into the canonical guard and exposes `airlock_guard_status`. Both are inert until the orchestrator writes an `airlock.contract/v2` dispatch contract to `.airlock/contract.json` before every dispatch. Read-only leaves use `ownedPaths: []` and `allowDispatch: false`. V2 supports an absolute worker `root`, relative or absolute `ownedPaths` across multiple roots, explicit `processPaths`, contract expiry, `allowDispatch`, and `actorMode`: `agent-id` (default) or `single-actor`. The safest fallback on a host that never emits `agent_id` is `single-actor`, which applies worker rules to everyone. README smoke test: write a contract, verify an orchestrator process-path edit and a worker owned-path edit both succeed under `agent-id`; repeat with `single-actor` expecting worker scope only.
 
 While a valid active v2 contract exists, top-level calls may write only explicit `processPaths` and `.airlock/**`; subagent calls may write only `ownedPaths` and can never write process paths or `.airlock/**`. Serialize all file-writing workers while this session-global contract is active; parallelize only read-only workers until per-worker contracts exist. Bash and PowerShell both block broad staging (including unscoped update staging for v2) and obvious out-of-contract redirection or write-cmdlet targets. File and shell targets resolve through their nearest existing ancestor so symlink/junction escapes are denied, and write-bearing compound commands with an unsafe directory change are denied. This common screening of shell writes is not hostile-process containment. Contract v1 remains supported with its original owned-path and broad-staging behavior, including unscoped `git add -u` and `git add --update`. The hook stays fail-open: a missing, expired, unreadable, or malformed contract never blocks anything.
 
@@ -175,7 +175,7 @@ Upload or install the same plugin through **Customize**. Cowork supports the exp
 OpenCode is supported in two roles:
 
 - External worker selected by `runtime: opencode`.
-- Direct host through the explicit `.opencode/command/airlock-*.md` commands in this source checkout.
+- Direct host through the explicit `.opencode/command/airlock-*.md` commands and the reviewed `.opencode/plugins/airlock-guard.js` adapter in this source checkout.
 
 The repository no longer registers auto-selected OpenCode skills. To expose commands in another project, install host-local command copies that reference this stable source checkout. The external worker source is `adapters/opencode/agents/airlock-worker.md`; install a byte-identical copy at `~/.config/opencode/agents/airlock-worker.md`.
 
@@ -183,6 +183,7 @@ The canonical external contract is `references/EXTERNAL-RUNTIME.md`; commands lo
 
 ```text
 node --test scripts/run-external-agent.test.mjs
+node --test scripts/opencode-guard.test.mjs
 ```
 
 It consumes a hashed `airlock.external-agent/v2` manifest, validates the exact baseline and permission policy, runs one bounded worker, performs deterministic validation and Git sealing, emits one bounded summary, and removes only declared task-owned state. See `adapters/opencode/README.md` for the strict contract.
@@ -208,6 +209,7 @@ Design approval, always-Full safety work, merges to main, and publication are ha
 ```text
 node --test scripts/plugin-policy.test.mjs
 node --test scripts/guard.test.mjs
+node --test scripts/opencode-guard.test.mjs
 node --test scripts/run-external-agent.test.mjs
 node --test scripts/build-review-bundle.test.mjs
 python ~/.local/bin/ai-usage_test.py
@@ -234,7 +236,7 @@ User messages use plain language while artifacts retain canonical terms for grep
 | test-fix-simplify | RED-GREEN-refactor |
 | all-round builder | worker |
 | questions waiting for you | DECISIONS.md |
-| production / irreversible work | Full work (Claude Code host only) |
+| production / irreversible work | Full work (guard-capable host only) |
 | reviewer's starting context | review bundle |
 | who runs the check | Executed by |
 | expensive workers allowed per package | weight budget |

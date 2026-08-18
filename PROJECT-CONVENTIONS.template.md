@@ -18,8 +18,9 @@ workflow artifacts. Compact normally uses one multipurpose `worker`. Full-lite p
 Crossing with required gates only. `/airlock:stop` ends command-activated mode.
 
 Usage policy: prototype/throwaway/exploratory work uses **no Airlock**; contained real changes use Compact;
-Full/irreversible/production work runs **on the Claude Code host only** (the guard hook is a Claude Code
-mechanism — OpenCode may serve as dispatched external worker, never as Full orchestrator).
+Full/irreversible/production work runs only on a **guard-capable host**: Claude Code with its PreToolUse
+hook, or OpenCode when `airlock_guard_status` reports `fullCapable: true`. An unguarded OpenCode host may
+serve as an external worker but must block direct Full orchestration.
 
 Session budgets are defaults for every Airlock session: at most 5 Crossings or the declared wall clock, then
 summarize and start a fresh session. Review rounds cap at 3 before an explicit continue decision.
@@ -75,7 +76,7 @@ when the main session uses Fable or an earlier Fable leaf was approved.
   docs/generation-log.jsonl (disclosure requirement); commit each asset with its import sidecar>`
 - **Branch + push policy:** `<e.g. work lands directly on main; commit as part of the task; push only when
   asked>`
-- **Release flow:** `<bump plugin.json + marketplace.json -> update changelog/README -> run the four test suites + claude plugin validate --strict for both manifests -> branch + PR (DECISION: link) -> after user merge, tag/publish only behind a second DECISION>`
+- **Release flow:** `<bump plugin.json + marketplace.json -> update changelog/README -> run the five test suites + claude plugin validate --strict for both manifests -> branch + PR (DECISION: link) -> after user merge, tag/publish only behind a second DECISION>`
 - **Release escalation:** `<migrations, credential changes, irreversible external state, and direct publication remain Full or explicitly gated>`
 - **Commit message convention:** `<e.g. conventional commits; end with the Co-Authored-By trailer>`
 - **Parallel sessions:** `<e.g. two sessions often share one checkout → every plan MUST declare a disjoint

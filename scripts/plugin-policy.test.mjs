@@ -293,7 +293,7 @@ test("release metadata agrees and credits the concise-output inspiration", async
   ]);
   const plugin = JSON.parse(pluginText);
   const marketplace = JSON.parse(marketplaceText);
-  assert.equal(plugin.version, "2.5.0");
+  assert.equal(plugin.version, "2.6.0");
   assert.equal(marketplace.plugins[0].version, plugin.version);
   assert.match(readme, /ayghri\/i-have-adhd/);
   assert.match(readme, /Cowork/);
@@ -324,7 +324,7 @@ test("orchestrator loads start.md via the plugin root, not a bare relative path"
   assert.doesNotMatch(orchestrator, /read `commands\/start\.md`(?! from)/i);
 });
 
-test("Full work is Claude Code host only; OpenCode hosts block it", async () => {
+test("Full work requires a guard-capable host and OpenCode checks its adapter", async () => {
   const [start, ocStart, ocPlan, ocShip, ocBrainstorm, ocReview, ocDebug] = await Promise.all([
     source("commands/start.md"),
     source(".opencode/command/airlock-start.md"),
@@ -335,22 +335,49 @@ test("Full work is Claude Code host only; OpenCode hosts block it", async () => 
     source(".opencode/command/airlock-debug.md"),
   ]);
 
-  assert.match(start, /Full work .*Claude Code host only/i);
+  assert.match(start, /Full work .*guard-capable host/i);
   assert.match(start, /Host harness gate/i);
   assert.match(start, /never downgraded to Compact/i);
-  assert.match(start, /rerun the task from Claude Code/i);
   assert.match(start, /Claude-hosted Full session .*`runtime: opencode`/i);
 
   for (const wrapper of [ocStart, ocPlan, ocShip, ocBrainstorm, ocReview]) {
     assert.match(wrapper, /OpenCode host/i, "wrapper declares its host");
+    assert.match(wrapper, /airlock_guard_status/i, "wrapper probes the guard");
+    assert.match(wrapper, /fullCapable/i, "wrapper requires full capability");
     assert.match(wrapper, /BLOCKED/i, "wrapper blocks");
-    assert.match(wrapper, /Claude Code guard hook/i, "wrapper names the missing guard");
   }
 
   assert.match(ocStart, /\*?\*?Quick and Compact\*?\*? work may proceed/i);
   assert.match(ocPlan, /BLOCKED/);
-  assert.match(ocDebug, /Quick and Compact debugging only/i);
+  assert.match(ocDebug, /Quick and Compact debugging/i);
+  assert.match(ocDebug, /airlock_guard_status/i);
   assert.match(ocDebug, /BLOCKED/);
+});
+
+test("OpenCode adapter delegates policy to the canonical guard", async () => {
+  const [plugin, core, config, adapter] = await Promise.all([
+    source(".opencode/plugins/airlock-guard.js"),
+    source(".opencode/airlock-guard-core.mjs"),
+    source("opencode.json"),
+    source("adapters/opencode/README.md"),
+  ]);
+  const { COVERED_TOOLS } = await import("../.opencode/airlock-guard-core.mjs");
+  assert.match(plugin, /airlock_guard_status/);
+  assert.match(plugin, /tool\.execute\.before/);
+  assert.match(plugin, /config: async/);
+  assert.match(plugin, /effectiveActor/);
+  assert.doesNotMatch(plugin, /const effectiveActor/);
+  assert.match(plugin, /!active && input\.tool === "bash" && !shell\.guardToolName/);
+  assert.match(plugin, /active && !actor/);
+  assert.match(plugin, /runGuardInputs/);
+  assert.match(core, /apply_patch cannot change an Airlock ledger/);
+  assert.match(core, /validV2Contract/);
+  assert.match(core, /resolveShellGuard/);
+  assert.match(core, /NODE_EXECUTABLE/);
+  assert.deepEqual(COVERED_TOOLS, ["edit", "write", "apply_patch", "bash", "task"]);
+  for (const toolName of COVERED_TOOLS) assert.match(adapter, new RegExp("`" + toolName + "`"));
+  assert.match(adapter, /Harness divergences/);
+  assert.equal(JSON.parse(config).permission.airlock_guard_status, "allow");
 });
 
 test("reviewer bundle is executable and pinned to the candidate identity", async () => {
@@ -595,7 +622,7 @@ test("release work is Compact until a direct publication mutation", async () => 
     assert.match(text, /migrations.*credential.*irreversible.*Full/is, filename);
   }
   assert.match(conventions, /plugin\.json.*marketplace\.json.*changelog.*README/is);
-  assert.match(conventions, /four test suites.*claude plugin validate.*both manifests/is);
+  assert.match(conventions, /five test suites.*claude plugin validate.*both manifests/is);
   assert.match(conventions, /branch.*PR.*DECISION.*after.*merge.*tag.*publish.*second DECISION/is);
 });
 

@@ -38,11 +38,11 @@ Check whether `.airlock/config.json` exists before reading it. When absent, reso
 
 `native` uses only the current host and its leaf subagents. `opencode` uses the deterministic external launcher only on a local host with Node.js, Git, and OpenCode available; before any external work, read `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` — the canonical external contract. Cowork web/mobile and any host without those executables must stop with the missing capability; never silently fall back or install dependencies.
 
-## Host harness gate (Claude-only Full)
+## Host harness gate (guard-capable Full)
 
-Full work — the Full workflow and any always-Full safety class — runs **on the Claude Code host only**, where the PreToolUse guard hook is loaded. On any other host (OpenCode, Cowork web/mobile, or a host without the guard), a task that classifies as **Full** is `BLOCKED`, never downgraded to Compact and never executed inline. State the cause (host lacks the guard), the impact (Full ceremony enforcement is unavailable), and the exact next action: rerun the task from Claude Code (`/airlock:start`), or submit it to a Claude-hosted session. Do not proceed with Full work from a non-Claude host under any override.
+Full work — the Full workflow and any always-Full safety class — runs only on a **guard-capable host**. Claude Code qualifies when its PreToolUse guard hook is loaded. OpenCode qualifies only when the `airlock_guard_status` tool is available and reports `fullCapable: true`. Cowork web/mobile and any host without either mechanism are `BLOCKED`, never downgraded to Compact and never executed inline. State the cause (guard unavailable), the impact (Full ceremony enforcement is unavailable), and one exact next action. A user override cannot bypass a failed guard-capability check.
 
-A Claude-hosted Full session may select `runtime: opencode` and dispatch OpenCode as an external **leaf worker**; that is Full orchestration on Claude Code with OpenCode as the leaf, and remains legal. The `runtime` option never changes which host runs the ceremony — only the leaf that executes the task. This gate is a host capability check, not a `runtime` routing decision.
+A Claude-hosted Full session may select `runtime: opencode` and dispatch OpenCode as an external **leaf worker**; that remains legal. The `runtime` option never changes which host runs the ceremony — only the leaf that executes the task. This gate is a host capability check, not a `runtime` routing decision.
 
 ## Classify
 
@@ -62,7 +62,7 @@ Escalate one level only when you can name the specific irreversible or cross-cut
 
 Class work by named criteria: Light is one file or a mechanical, fully specified change with an obvious check; Standard is contained implementation with clear seams and tests, and is the default; Complex requires at least one of three modules touched, a shared interface other code depends on, or an unknown fix location at plan time; Critical requires an irreversible change, credentials/secrets/security boundary, a published contract others consume, or expensive unwind. If you cannot name which criterion is met, the class is Standard.
 
-A Full classification on a host without the Claude Code guard hook is `BLOCKED` per the **Host harness gate**: stop and require a rerun from Claude Code. Never downgrade Full to Compact as a workaround; Full work done without the guard is not done under Airlock.
+A Full classification on a host without a verified guard is `BLOCKED` per the **Host harness gate**. Never downgrade Full to Compact as a workaround; Full work done without the guard is not done under Airlock.
 
 Publication means directly mutating what users consume, such as pushing a tag consumers auto-pull, publishing to a marketplace or registry, or deploying. The mutating step always requires an explicit DECISION approval, while the surrounding work classifies on its own merits. A release PR merged by the user is Compact by default: version bumps, changelog/README updates, validation, and opening the PR use the merge as the approval gate. After merge, tag or publish only behind a second DECISION. A release containing migrations, credential changes, or irreversible external state remains Full.
 
@@ -88,7 +88,7 @@ If a required agent type or delegation capability is unavailable, STOP and repor
 
 Inline execution is allowed only for Quick work. Browser driving, git history surgery, and environment repair are implementation work during Compact or Full work: delegate them or STOP.
 
-For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` directly. For Quick work, derive the exact manifest scope from the user's request, use task-owned Quick identifiers where the strict schema requires pack or Crossing identifiers, and create no workflow artifacts. For Full work on a Claude Code host, follow the canonical Full commands; on any other host, Full work is BLOCKED by the Host harness gate. The OpenCode worker remains a leaf with `task` and interactive questions denied. External execution is never selected merely because it is configured: use it only after Airlock is explicitly started for the task.
+For `opencode`, apply the contract in `${CLAUDE_PLUGIN_ROOT}/references/EXTERNAL-RUNTIME.md` directly. For Quick work, derive the exact manifest scope from the user's request, use task-owned Quick identifiers where the strict schema requires pack or Crossing identifiers, and create no workflow artifacts. For Full work directly on OpenCode, call `airlock_guard_status` first and follow canonical Full commands only when it reports `fullCapable: true`; otherwise the Host harness gate blocks the task. The OpenCode external worker remains a leaf with `task` and interactive questions denied. External execution is never selected merely because it is configured: use it only after Airlock is explicitly started for the task.
 
 ## Unattended mode
 

@@ -1,11 +1,10 @@
 ---
-description: BLOCKED on OpenCode — Full work requires the Claude Code host.
+description: Review Full Airlock work on a verified OpenCode guard host.
 ---
 
-Full work runs **on the Claude Code host only**, where the PreToolUse guard hook is active. This is an OpenCode host, so this command is `BLOCKED`:
+This command runs on an **OpenCode host**. Before proceeding, call `airlock_guard_status`.
 
-- Cause: this host does not load the Claude Code guard hook.
-- Impact: Full ceremony enforcement (ledger hygiene, budgets, review-round cap) is unavailable here.
-- Next action: rerun this task from Claude Code via `/airlock:start` and follow the Full workflow there.
+- If it reports `fullCapable: true`, read `commands/review.md` from the Airlock source checkout and follow it.
+- Otherwise this command is `BLOCKED`: Full ceremony enforcement is unavailable, so stop and report the failed status.
 
-Do not approximate, downgrade, or reimplement this workflow on OpenCode.
+$ARGUMENTS
