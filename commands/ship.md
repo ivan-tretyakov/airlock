@@ -45,12 +45,14 @@ A passing audit freezes the launcher-sealed candidate precursor; subsequent gate
 
 ## 3. Use fresh evidence, without duplicate runs
 
-Implementers provide focused RED/GREEN and Crossing-check evidence during implementation. `ship` checks that evidence against the sealed candidate and reruns **only** required evidence that is missing or stale. A project-mandated per-commit suite is a required Crossing check; red means stop, not ship.
+Implementers provide focused RED/GREEN and Crossing-check evidence during implementation. `ship` checks that evidence against the sealed candidate and reruns **only** required evidence that is missing or stale, using each gate row's `Executed by` mode. A project-mandated per-commit suite is a required Crossing check; red means stop, not ship.
+
+Independent verification is **pack-level by default**. Intermediate Crossings ship on implementer evidence plus the orchestrator's own deterministic checks. Do not dispatch a verifier per Crossing unless the approved gate row says `independent` with a stated reason.
 
 For the final Crossing:
 
 1. Set the Delivery Pack to `candidate` after code freeze.
-2. Have the planned independent verifier context or specialized gate role run each required final gate against that exact candidate without editing source during gate execution. Do not replace independent verification with the implementer’s focused checks.
+2. Have the planned independent verifier context or specialized gate role run every required final gate marked `independent` against that exact candidate without editing source during gate execution. Do not replace independent verification with the implementer’s focused checks.
 3. Reuse fresh evidence for the same candidate. Rerun only missing/stale gates.
 4. Keep functional, visual, live-integration, and cleanup results separate. Mutating validation needs an approved throwaway target and cleanup evidence.
 

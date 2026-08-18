@@ -10,7 +10,7 @@ Precondition: an approved design or scope contract exists. If not, stop and invo
 
 Most Full work is one coherent outcome. Start every plan at the **Full-lite** shape and escalate only when the work actually demands more:
 
-- **Full-lite** (default): goal and architecture, the file contract, **one** compact Delivery Pack row, the task checklist with Crossing mapping, one compact route row, and only genuinely required gates. Prefer one `worker` per Crossing and keep the guideline at no more than three dispatches per Crossing, including required independent gates. Initialize the ledger at the first `ship` rather than up front; a single-Crossing pack may open and close its Resume checkpoint in one session.
+- **Full-lite** (default): goal and architecture, the file contract, **one** compact Delivery Pack row, the task checklist with Crossing mapping, one compact route row, and only genuinely required gates. Prefer one `worker` per Crossing and keep the guideline at no more than three dispatches per Crossing. Independent verification is normally one final pack-level judgment gate, not an extra dispatch at every Crossing. Initialize the ledger at the first `ship` rather than up front; a single-Crossing pack may open and close its Resume checkpoint in one session.
 - **Escalate to the full schema** only when the plan has multiple Delivery Packs, parallel lanes with disjoint ownership, an external-runtime route, or work that must span sessions. Add only the sections the escalation actually needs.
 
 Explicit risk decisions still apply at every size; ceremony should not outweigh the work.
@@ -65,28 +65,26 @@ Refresh STATUS at package acceptance, review-round close, before compaction, and
 
 Full implementation routes are subagent-only. Record the route per pack/task; do not make one global agent choice for the whole plan.
 
-| Pack / Crossing / task | Work class | Host role | Mode | Why | Parallel group | Checkpoint | Owns |
-|---|---|---|---|---|---|---|---|
-| `<IDs>` | Standard | implementer | subagent | `<one clause>` | A | yes/no | `<exact paths>` |
+| Pack / Crossing / task | Work class | Host role | Selected leaf / runtime | Selected model / variant | Mode | Why / criterion / independence | Parallel group | Checkpoint | Owns |
+|---|---|---|---|---|---|---|---|---|---|
+| `<IDs>` | Standard | implementer | `<configured subagent or runtime>` | `<approved model / variant>` | subagent | `default: contained work with clear seams and tests` | A | yes/no | `<exact paths>` |
 
 Portable work classes describe risk and judgment, not a vendor model:
 
-- **Light** — mechanical or tightly contained, low-risk work with an obvious check.
-- **Standard** — normal contained implementation with clear contracts and tests.
-- **Complex** — cross-cutting behavior, architecture, or difficult diagnosis.
-- **Critical** — safety-sensitive, irreversible, public-contract, or expensive-to-unwind work.
+- **Light** — one file or a mechanical, fully specified change with an obvious check.
+- **Standard** — contained implementation with clear seams and tests. **This is the default.**
+- **Complex** — at least one of: touches at least three modules; changes a shared interface other code depends on; or has an unknown fix location at plan time.
+- **Critical** — at least one of: irreversible; touches credentials, secrets, or security boundaries; changes a published contract others consume; or is expensive to unwind.
 
-Use portable host roles such as `orchestrator`, `implementer`, `investigator`, `verifier`, `independent-reviewer`, `browser-verifier`, and `visual-verifier`. Then map the roles to what the active host actually offers:
+If you cannot name which criterion is met, the class is Standard. A route row claiming Complex or Critical without its named criterion in `Why / criterion / independence` is invalid and must be corrected before approval.
 
-| Host role / work class | Selected host agent or runtime | Selected available model | Independence / rationale |
-|---|---|---|---|
-| `<role> / <class>` | `<configured subagent or external runtime>` | `<host-selected model>` | `<why; note any independence limitation>` |
+Select the leaf by role and the model by risk. The route table above is the authoritative record: class, host role, selected leaf/runtime, and selected model/variant are separate facts; `Why / criterion / independence` records the reason, including any required Complex/Critical criterion. For Claude Code, pass the selected model with the individual `Agent` dispatch. For OpenCode, select only a configured subagent whose resolved model/variant matches the approved route row; a mismatch or fallback blocks dispatch. Never route a leaf to Fable without fresh per-invocation user approval.
 
-Do not bake host-specific model IDs into the canonical workflow. The plan records the selected mapping; gate evidence records the effective runtime, agent, model, and variant that actually ran.
+Do not bake host-specific model IDs into the portable class definitions. The plan records the selected mapping; gate evidence records the effective runtime, agent, model, and variant that actually ran.
 
 **Browser-role fallback.** Some hosts (Cowork in particular) defer MCP tool schemas and disable `ToolSearch` for restricted subagents, so a restricted browser agent such as `visual-review` receives no browser tools at all. When a dispatched browser-verifier or visual-verifier reports this capability gap, re-route that role to the host's all-tools general agent as a forced substitution, not a preference. The substitute dispatch must restate every permanent browser guardrail: it is read-only for source — no edit, stage, or commit during gate execution, which would invalidate the gate — and it is a leaf that must not invoke `Agent` or `Task`; never access credentials, tokens, cookies, local storage, or browser profiles; request console and network evidence only through filtered output; and never echo token-bearing URLs. Record the substitution and its independence limitation in the route row and gate evidence. If no all-tools agent exists either, the gate is `blocked`, never simulated.
 
-Prefer `worker` over an investigate -> code-* -> verify sequence unless the investigation output is a user decision input, the work is Critical, or a gate requires independence. Use specialist leaves for those exceptions. If a route exceeds its dispatch budget, require one PROGRESS line with the reason.
+Prefer `worker` over an investigate -> code-* -> verify sequence unless the investigation output is a user decision input, the work is Critical, or a gate requires independence. Use specialist leaves for those exceptions. If a route exceeds its dispatch-count budget, require one PROGRESS line with the reason. Per Delivery Pack, use at most one `code-critical` and at most two `code-complex` dispatches by default; exceeding either weight budget requires one PROGRESS line naming the applicable work-class criterion.
 
 Parallel read-only tasks may run concurrently when useful. Serialize all file-writing workers while the session-global v2 contract is active, even when `Owns` sets are disjoint. Named per-worker contracts (`.airlock/contracts/<worker-id>.json`) are a 2.4 design note only and are not implemented here. Continue to serialize shared files, entry points, and project-wide configuration.
 
@@ -102,9 +100,17 @@ The planner chooses gates from the outcome’s risks; Airlock does not demand ev
 
 Give detailed rows only to required gates:
 
-| Gate ID | Pack ID | Gate | Applicability | Initial gate state | Executor host role | Command / MCP tool | Environment / target | Pass condition / artifact |
-|---|---|---|---|---|---|---|---|---|
-| `<gate-id>` | `<pack-id>` | `<technical/review/browser/...>` | required | pending | verifier | `<exact invocation>` | `<where/what>` | `<observable result>` |
+| Gate ID | Pack ID | Crossing / scope | Gate | Applicability | Initial gate state | Executed by | Execution reason | Command / MCP tool | Environment / target | Pass condition / artifact |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `<gate-id>` | `<pack-id>` | `<crossing-id or final pack>` | `<technical/review/browser/...>` | required | pending | implementer | `<why this mode is sufficient; name a specialised verifier role or why independence is needed when applicable>` | `<exact invocation>` | `<where/what>` | `<observable result>` |
+
+`Executed by` has exactly three values:
+
+- `implementer` — the implementing leaf runs the check inside its own dispatch and returns evidence; this creates no extra dispatch.
+- `orchestrator-inline` — the orchestrator runs the command between dispatches; this creates no extra dispatch.
+- `independent` — a separate verifier or reviewer runs the check against the frozen candidate; this creates one dispatch.
+
+Deterministic checks — unit tests, typecheck, lint, and build — are `implementer` or `orchestrator-inline` by default. Reserve `independent` for judgment gates such as pre-ship code review, visual fidelity, browser-functional work, and final pack gates. A per-Crossing gate marked `independent` requires a one-line reason in its Execution reason cell.
 
 For a plausibly relevant gate that is omitted, record one compact decision:
 
@@ -116,7 +122,7 @@ Gate applicability, runtime state, waiver semantics, and the evidence-record fie
 
 If any task creates a temporary non-product artifact or process, cleanup is a required gate rather than a discretionary gate. Its pass condition names the exact task-owned paths/processes and proves they were removed or stopped. Add the gate through an approved plan/ledger amendment if the need is discovered during execution.
 
-Implementers run focused RED/GREEN and Crossing checks. After code freeze, an independent verifier context or specialized gate role runs the required final pack gates against one exact candidate without editing source during gate execution. A pre-ship independent-review gate is part of acceptance; post-ship feedback belongs to Airlock **`review`**.
+Implementers run focused RED/GREEN and Crossing checks. Independent verification is pack-level by default: intermediate Crossings ship on implementer evidence plus the orchestrator's deterministic checks. Do not dispatch a verifier per Crossing unless its approved gate row is `independent` with a stated reason. After code freeze, the planned independent verifier context or specialized gate role runs required final pack judgment gates against one exact candidate without editing source during gate execution. A pre-ship independent-review gate is part of acceptance; post-ship feedback belongs to Airlock **`review`**.
 
 Each final gate records its evidence per the LIFECYCLE.md field list, including the exact candidate identity and the effective runtime/agent/model/variant that ran.
 

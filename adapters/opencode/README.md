@@ -101,7 +101,7 @@ The shared skills use portable work classes and host roles rather than fixed mod
 - **Complex** for cross-cutting behavior, architecture, and difficult diagnosis.
 - **Critical** for safety-sensitive, irreversible, public-contract, or expensive-to-unwind work.
 
-Plans also record host roles such as implementer, investigator, verifier, independent reviewer, browser verifier, and visual verifier. OpenCode's `task` tool selects a configured subagent rather than accepting an arbitrary model per call. Map these classes and roles to agents you already maintain:
+Plans also record host roles such as implementer, investigator, verifier, independent reviewer, browser verifier, and visual verifier. A route row separately records the work class, named Complex/Critical criterion when applicable, selected leaf, and selected model. OpenCode's `task` tool selects a configured subagent rather than accepting an arbitrary model per call, so resolve that configured subagent to the route row's approved model before dispatch and block any mismatch or fallback. Map these classes and roles to agents you already maintain:
 
 ```json
 {
@@ -125,6 +125,6 @@ Plans also record host roles such as implementer, investigator, verifier, indepe
 }
 ```
 
-Replace placeholder IDs with enabled models. Plans record portable class/role plus the selected host agent/model; gate evidence records what actually ran. A material capability downgrade requires approval rather than a silent fallback.
+Replace placeholder IDs with enabled models. Standard is the default when no Complex/Critical criterion can be named; use a read-only investigation for approach uncertainty rather than selecting a heavier leaf. For Compact and Full-lite work, do not declare a project `verify` subagent merely for deterministic checks: the implementer or orchestrator runs those checks. Declare `verify` and `review` only when the project actually uses pack-level judgment gates. Plans record portable class/role plus the selected host agent/model; gate evidence records what actually ran. A material capability downgrade requires approval rather than a silent fallback.
 
 For a visual gate, preflight Playwright/Chrome MCP and authentication. Prefer a read-only visual agent that captures fresh evidence and assesses it against the cited spec. If browser state cannot be shared, the primary captures evidence and the visual agent assesses it. Never read credentials or mutate external state without an approved throwaway target and cleanup plan.

@@ -22,6 +22,8 @@ Every gate has three independent dimensions:
 
 Each evidence record identifies: gate ID, exact candidate (full commit/tree, or `base SHA + staged product-diff hash`), timestamp, executor host role and effective runtime/agent/model/variant, command or MCP tool, environment/target, result, and artifact reference. External evidence also records the additional fields required by `EXTERNAL-RUNTIME.md`. A substantive change to a candidate-bearing path (code, tests, configuration, generated artifacts, cited specs) stales every affected gate; a ledger-only bookkeeping edit does not.
 
+The approved plan records each required gate's `Executed by` mode: `implementer`, `orchestrator-inline`, or `independent`. Deterministic checks are normally implementer or orchestrator-inline evidence; independent verification is pack-level by default and is reserved for judgment or final pack gates. A per-Crossing independent gate needs a stated reason in its plan row.
+
 ## Resume checkpoint fields
 
 The orchestrator owns exactly one `## Resume checkpoint` section in the ledger, replaced in place — never appended, never duplicated (the guard hook denies a second checkpoint and enforces the ledger line cap). Keep it bounded to:
