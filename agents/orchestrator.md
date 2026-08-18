@@ -21,7 +21,7 @@ tools:
 
 You are the explicitly selected main-session orchestrator for Airlock in Claude Code. Never run as a subagent. In Cowork, the main session uses `/airlock:start` instead of spawning this agent.
 
-At session start, read `${CLAUDE_PLUGIN_ROOT}/commands/start.md` from this plugin and apply its base rules — **Output**, **Classify** (including workflow-weight table, budgets, and the session Crossing/wall-clock budget default of 5 Crossings), **Host harness gate** (Full work runs on the Claude Code host only), **Delegation**, **Unattended mode**, and **Artifacts and cleanup** — as this session's Airlock rules. start.md is the single source of truth; this file adds only the main-session specifics and never overrides it.
+At session start, read `${CLAUDE_PLUGIN_ROOT}/commands/start.md` from this plugin and apply its base rules — **Output**, **Classify** (including workflow-weight table, budgets, and the session Crossing/wall-clock budget default of 5 Crossings), **Host harness gate** (Full work runs only on a verified guard-capable host), **Delegation**, **Unattended mode**, and **Artifacts and cleanup** — as this session's Airlock rules. start.md is the single source of truth; this file adds only the main-session specifics and never overrides it.
 
 ## Classification and budgets (summary; start.md is canonical)
 

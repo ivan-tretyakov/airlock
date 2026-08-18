@@ -2,6 +2,28 @@
 
 Airlock's canonical Full workflow lives in `commands/`. OpenCode uses explicit commands only; no Airlock skill is registered for automatic selection.
 
+## Full-work guard
+
+OpenCode can orchestrate Full work only when the reviewed `.opencode/plugins/airlock-guard.js` plugin is registered and `airlock_guard_status` reports `fullCapable: true`. The adapter invokes the canonical `hooks/guard.mjs` policy for `edit`, `write`, `apply_patch`, `bash`, and `task`; it identifies root sessions as orchestrators and child sessions as workers. It rejects active-contract operations when session attribution cannot be resolved, except `actorMode: "single-actor"`, which applies worker scope to every session without attribution.
+
+Register the plugin from the stable Airlock checkout and allow its status tool in the same project or global configuration:
+
+```json
+{
+  "plugin": ["file:///absolute/path/to/airlock/.opencode/plugins/airlock-guard.js"],
+  "permission": { "airlock_guard_status": "allow" }
+}
+```
+
+Restart OpenCode, then call `airlock_guard_status` before starting Full work. `healthy: true` and `fullCapable: true` are required; any other result blocks Full work. Status reports the selected `shell` and `shellAnalyser`; supported PowerShell/pwsh shells use the `PowerShell` analyser, while bash/sh/zsh/dash/ksh use `Bash`. An explicit `cmd` or unknown shell makes Full work unavailable. The adapter is an ordinary user-account guardrail, not hostile-process containment.
+
+## Harness divergences
+
+- `apply_patch` cannot change a ledger. Use `edit` or `write`, because ledger hygiene requires content-aware simulation.
+- Missing Node, a failed guard subprocess, or an unsupported configured shell fail closed for guarded OpenCode work; malformed, expired, or missing contracts retain the canonical guard's fail-open compatibility behavior.
+- Coverage is exactly `edit`, `write`, `apply_patch`, `bash`, and `task`. A newly introduced mutating OpenCode tool is outside the guard until this adapter and its tests explicitly add it.
+- The OpenCode `bash` tool runs the configured shell. Set `"shell": "powershell"`/`"pwsh"` for PowerShell or `"shell": "/bin/bash"` for a POSIX shell; the adapter matches its analyser to that shell rather than the host OS.
+
 ## External-runtime worker
 
 The reviewed worker source is [`agents/airlock-worker.md`](agents/airlock-worker.md). Install a byte-identical copy at `~/.config/opencode/agents/airlock-worker.md`; no `opencode.jsonc` change is required. The worker is `mode: primary` because `opencode run --agent` cannot target a `mode: subagent` agent: OpenCode warns and falls back to its default primary. It deliberately has no fixed model or variant.
@@ -69,16 +91,13 @@ The worker is a user-account process with advisory model instructions plus deter
 
 This repository's `.opencode/command/` directory supplies explicit commands that read the canonical command files:
 
-- `/airlock-start` — OpenCode host; Quick and Compact only. Full-class tasks are `BLOCKED` per the Host harness gate.
+- `/airlock-start` — OpenCode host; Quick and Compact proceed. Full-class tasks require `airlock_guard_status.fullCapable: true`.
 - `/airlock-stop`
 - `/airlock-setup`
-- `/airlock-brainstorm` — blocked on OpenCode (Full work requires the Claude Code host)
-- `/airlock-plan` — blocked on OpenCode (Full work requires the Claude Code host)
-- `/airlock-ship` — blocked on OpenCode (Full work requires the Claude Code host)
-- `/airlock-review` — blocked on OpenCode (Full work requires the Claude Code host)
-- `/airlock-debug` — Quick/Compact debugging only; Full-class debugging is blocked
+- `/airlock-brainstorm`, `/airlock-plan`, `/airlock-ship`, and `/airlock-review` — require `airlock_guard_status.fullCapable: true`.
+- `/airlock-debug` — Quick/Compact debugging proceeds; Full-class debugging requires `airlock_guard_status.fullCapable: true`.
 
-OpenCode never runs Full ceremony. Full work runs on the Claude Code host only (where the guard hook is loaded); OpenCode participates as a dispatched external leaf worker from a Claude-hosted Full session. The `airlock-*` commands here declare their host and block rather than downgrade.
+Without the reviewed plugin, OpenCode never runs Full ceremony and may participate only as a dispatched external leaf worker from a Claude-hosted Full session. The `airlock-*` commands block rather than downgrade when the guard-capability probe fails.
 
 Restart OpenCode after changing commands or configuration because they are loaded at startup. Airlock remains inactive until `/airlock-start` is invoked.
 

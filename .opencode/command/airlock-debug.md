@@ -1,9 +1,9 @@
 ---
-description: Debug a non-trivial problem on an OpenCode host (Quick/Compact only).
+description: Debug a non-trivial problem on an OpenCode host.
 ---
 
-This command runs on an **OpenCode host**: the Claude Code PreToolUse guard hook is not loaded here. Read `commands/debug.md` from the Airlock source checkout and follow it for Quick and Compact debugging only.
+This command runs on an **OpenCode host**. Read `commands/debug.md` from the Airlock source checkout and follow it for Quick and Compact debugging.
 
-If the debugging classifies as **Full** — safety-sensitive, irreversible, production, or expensive-to-unwind — stop with `BLOCKED` and rerun from Claude Code via `/airlock:start`. Do not downgrade Full debugging to Compact on this host.
+If the debugging classifies as **Full** — safety-sensitive, irreversible, production, or expensive-to-unwind — call `airlock_guard_status`. Continue only when it reports `fullCapable: true`; otherwise stop with `BLOCKED`. Do not downgrade Full debugging to Compact.
 
 $ARGUMENTS
