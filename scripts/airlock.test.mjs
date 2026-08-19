@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -37,11 +37,19 @@ async function project(t, plan = basePlan()) {
   await writeFile(path.join(root, "baseline.txt"), "baseline\n");
   execFileSync("git", ["-C", root, "add", "."]);
   execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
+  const routes = { version: 1, claude: {}, opencode: {} };
+  for (const host of ["claude", "opencode"]) {
+    for (const role of ["builder", "checker", "browser"]) {
+      routes[host][role] = Object.fromEntries(["light", "standard", "complex", "critical"].map((risk) => [risk, { model: `test/${host}-${role}-${risk}`, effort: "medium" }]));
+    }
+  }
+  await mkdir(path.join(root, ".git", "airlock"), { recursive: true });
+  await writeFile(path.join(root, ".git", "airlock", "models.json"), `${JSON.stringify(routes, null, 2)}\n`);
   return root;
 }
 
-function run(root, args) {
-  return spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: "utf8" });
+function run(root, args, env = {}) {
+  return spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
 }
 
 async function readPlan(root) {
@@ -100,7 +108,7 @@ test("init state does not poison the first task boundary", async (t) => {
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
-test("OpenCode bootstrap installs missing command and bindings without replacing the plan", async (t) => {
+test("OpenCode bootstrap installs a model-neutral command without replacing the plan", async (t) => {
   const task = { id: "T1", title: "Bootstrap", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
   const root = await project(t, basePlan([task]));
   const before = await readFile(path.join(root, "airlock.plan.json"), "utf8");
@@ -108,8 +116,6 @@ test("OpenCode bootstrap installs missing command and bindings without replacing
   assert.equal(result.status, 0, result.stderr);
   assert.equal(await readFile(path.join(root, "airlock.plan.json"), "utf8"), before);
   assert.match(await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8"), /airlock next --host opencode/);
-  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-builder-glm.md"), "utf8"), /model: zai-coding-plan\/glm-5\.3/);
-  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-browser-sol.md"), "utf8"), /model: openai\/gpt-5\.6-sol/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
@@ -131,7 +137,7 @@ test("next, start, audit, and done create an audited task commit", async (t) => 
   const root = await project(t, basePlan([task]));
   const next = run(root, ["next"]);
   assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /TASK T1 · builder · sonnet/);
+  assert.match(next.stdout, /TASK T1 · builder · test\/claude-builder-standard · medium/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
   await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n", { encoding: "utf8" }).catch(async () => {
     const { mkdir } = await import("node:fs/promises");
@@ -362,12 +368,19 @@ test("critical-model budget parks expensive work while allowing cheap work", asy
   assert.match(run(root, ["next"]).stdout, /BUDGET REACHED: maxExpensive/);
 });
 
-test("OpenCode briefs name the exact configured agent", async (t) => {
-  const task = { id: "T1", title: "Route", role: "checker", risk: "critical", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+test("OpenCode configuration creates local model-bound agents with effort", async (t) => {
+  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
   const root = await project(t, basePlan([task]));
-  const next = run(root, ["next", "--host", "opencode"]);
+  const opencodeConfig = path.join(root, "opencode-config");
+  const env = { OPENCODE_CONFIG_DIR: opencodeConfig };
+  const configured = run(root, ["config", "--project", "--host", "opencode", "--role", "browser", "--risk", "light", "--model", "openai/gpt-5.6-luna", "--effort", "low"], env);
+  assert.equal(configured.status, 0, configured.stderr);
+  const agent = path.join(opencodeConfig, "agent", "airlock-browser-openai-gpt-5-6-luna-low.md");
+  assert.match(await readFile(agent, "utf8"), /model: openai\/gpt-5\.6-luna/);
+  assert.match(await readFile(agent, "utf8"), /variant: low/);
+  const next = run(root, ["next", "--host", "opencode"], env);
   assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /AGENT airlock-checker-sol/);
+  assert.match(next.stdout, /AGENT airlock-browser-openai-gpt-5-6-luna-low/);
 });
 
 test("parallel tasks with disjoint glob prefixes may start together", async (t) => {
@@ -380,18 +393,20 @@ test("parallel tasks with disjoint glob prefixes may start together", async (t) 
   assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
 });
 
-test("OpenCode bindings cover each configured role-model pair", async () => {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const config = JSON.parse(await readFile(path.join(root, "opencode.json"), "utf8"));
-  const models = JSON.parse(await readFile(path.join(root, ".airlock", "models.json"), "utf8"));
-  for (const role of ["builder", "checker", "browser"]) {
-    for (const model of new Set(Object.values(models.opencode))) {
-      assert.ok(
-        config.agent[models.opencodeAgents[model][role]]?.model === model && config.agent[models.opencodeAgents[model][role]]?.prompt === `{file:./roles/${role}.md}`,
-        `missing ${role} binding for ${model}`,
-      );
-    }
-  }
+test("missing local routes fail closed and plans cannot pin a model", async (t) => {
+  const root = await bareProject(t);
+  const configDir = path.join(root, "empty-airlock-config");
+  const env = { AIRLOCK_CONFIG_DIR: configDir };
+  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(basePlan([task]), null, 2)}\n`);
+  const missing = run(root, ["next", "--host", "opencode"], env);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /missing local route for opencode\/browser\/light/);
+  task.model = "openai/gpt-5.6-luna";
+  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(basePlan([task]), null, 2)}\n`);
+  const pinned = run(root, ["next"], env);
+  assert.equal(pinned.status, 1);
+  assert.match(pinned.stderr, /model is not supported/);
 });
 
 test("prompt surface contains only the slim roles and two shims", async () => {

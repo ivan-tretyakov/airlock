@@ -1,6 +1,6 @@
 {
   "name": "airlock",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
   "type": "module",
   "bin": {
@@ -16,9 +16,7 @@
   "files": [
     "scripts/airlock.mjs",
     "roles",
-    ".airlock/models.json",
     ".opencode/command/airlock.md",
-    "opencode.json",
     "README.md",
     "LICENSE"
   ],

@@ -1,6 +1,6 @@
 # airlock
 
-Airlock is plan-driven task orchestration for Claude Code and OpenCode. One `airlock.plan.json` gives each worker a goal, owned paths, acceptance criterion, model, and durable state. The coordinator validates that plan before dispatch rather than attempting to predict individual tool calls.
+Airlock is plan-driven task orchestration for Claude Code and OpenCode. One `airlock.plan.json` gives each worker a goal, owned paths, acceptance criterion, role, risk, and durable state. The coordinator validates that plan before dispatch rather than attempting to predict individual tool calls.
 
 ## Quick Start
 
@@ -18,7 +18,13 @@ Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The com
 
 Each task requires an id, role (`builder`, `checker`, or `browser`), risk, at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance.
 
-Models resolve from `.airlock/models.json`. A task may override its resolved model explicitly. Update model cost policy there, not in role prompts.
+Models and effort resolve from local role/risk routing. They are never stored in the plan or repository. Configure the routing before dispatching work:
+
+```text
+airlock config --host opencode --role browser --risk light --model openai/gpt-5.6-luna --effort low
+```
+
+The command writes user-local configuration by default. Add `--project` to write an override under the repository's Git common directory (`.git/airlock/models.json`), which is never a tracked worktree file. Project routes override user routes. A missing route fails with the exact host/role/risk combination; there are no bundled provider defaults.
 
 ## Commands
 
@@ -42,12 +48,12 @@ At `NOTHING TO DO`, `/airlock` presents all open blocking decisions and assumpti
 
 Claude Code uses the three portable files in `roles/` and supplies the resolved model with each `Agent` dispatch.
 
-OpenCode's `task` API selects models from static agent configuration. `opencode.json` therefore contains one binding per role/model combination, each referencing the same portable role file. `.airlock/models.json` maps each resolved role/model pair to its exact agent name, which `next --host opencode` emits as `AGENT`. Keep the two files synchronized, then quit and restart OpenCode after changing the configuration.
+Claude Code receives the locally resolved model at dispatch. OpenCode's `task` API selects models from static agent configuration, so `airlock config --host opencode ...` generates the required role/model/effort agent in the user's OpenCode agent directory and `next --host opencode` emits its exact `AGENT` name. Restart OpenCode after changing local routes.
 
 The Claude shim invokes its bundled CLI through `${CLAUDE_PLUGIN_ROOT}`. Install the OpenCode CLI globally from the release tag:
 
 ```text
-npm install --global github:ivan-tretyakov/airlock#v3.0.0
+npm install --global github:ivan-tretyakov/airlock#v3.0.1
 ```
 
 For local development, run `npm link` in this checkout.
@@ -58,7 +64,7 @@ Bootstrap an OpenCode project without merging its existing configuration:
 airlock init "Add an export command" --done "npm test passes" --host opencode
 ```
 
-This adds the `/airlock` command and six model-bound Airlock agents under `.opencode/`. Re-run the same command after a global upgrade to add missing bindings; existing plan, command, and agent files are not overwritten.
+This adds the model-neutral `/airlock` command under `.opencode/`. Configure OpenCode routes with `airlock config`; it writes generated model-bound agents only to the user's OpenCode configuration. Re-run the same command after a global upgrade to add a missing project command; existing plan and command files are not overwritten.
 
 The host surface is one command each: `commands/airlock.md` and `.opencode/command/airlock.md`. There are no hooks, guard plugins, external launchers, ledgers, or lifecycle templates.
 
