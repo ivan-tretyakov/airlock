@@ -45,8 +45,13 @@ function now() {
   return new Date().toISOString();
 }
 
-function normalizePath(value) {
+function slashPath(value) {
   return String(value).replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+}
+
+function normalizePath(value) {
+  const normalized = slashPath(value);
+  return ["win32", "darwin"].includes(process.platform) ? normalized.toLowerCase() : normalized;
 }
 
 function parseCli(argv) {
@@ -297,7 +302,7 @@ function git(root, args, options = {}) {
 }
 
 function gitPaths(root, args) {
-  return git(root, args).split("\0").filter(Boolean).map(normalizePath);
+  return git(root, args).split("\0").filter(Boolean).map(slashPath);
 }
 
 function gitReference(root, ref) {
@@ -314,7 +319,11 @@ function relativePlan(root, planPath) {
 
 function isCoordinatorPath(item, planPath, root) {
   const normalized = normalizePath(item);
-  return normalized === relativePlan(root, planPath) || normalized === ".airlock" || normalized.startsWith(".airlock/");
+  return normalized === relativePlan(root, planPath)
+    || normalized === ".airlock"
+    || normalized.startsWith(".airlock/")
+    || normalized === ".opencode/command/airlock.md"
+    || normalized.startsWith(".opencode/agent/airlock-");
 }
 
 function dirtyProductPaths(root, planPath) {
@@ -541,30 +550,66 @@ function renderMarkdown(root, plan, host) {
   return `# Airlock\n\n${statusText(root, plan, host)}\n\n## Tasks\n\n| ID | Task | State | Route |\n|---|---|---|---|\n${rows}\n\n## Decisions\n\n${decisions}\n`;
 }
 
+function roleBody(role) {
+  const rolePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "roles", `${role}.md`);
+  return readFileSync(rolePath, "utf8").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+async function bootstrapOpenCode(root, models) {
+  const created = [];
+  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const commandPath = path.join(root, ".opencode", "command", "airlock.md");
+  if (!existsSync(commandPath)) {
+    await mkdir(path.dirname(commandPath), { recursive: true });
+    await writeFile(commandPath, readFileSync(path.join(sourceRoot, ".opencode", "command", "airlock.md"), "utf8"), "utf8");
+    created.push(commandPath);
+  }
+  for (const [model, bindings] of Object.entries(models.opencodeAgents)) {
+    for (const role of ROLES) {
+      const name = bindings[role];
+      const agentPath = path.join(root, ".opencode", "agent", `${name}.md`);
+      if (existsSync(agentPath)) continue;
+      const permission = role === "builder" ? "" : "permission:\n  edit: deny\n";
+      const markdown = `---\ndescription: Airlock ${role} on ${model}.\nmode: subagent\nmodel: ${model}\n${permission}---\n\n${roleBody(role)}`;
+      await mkdir(path.dirname(agentPath), { recursive: true });
+      await writeFile(agentPath, markdown, "utf8");
+      created.push(agentPath);
+    }
+  }
+  return created;
+}
+
 async function initPlan(root, planPath, goal, flags) {
-  if (existsSync(planPath)) throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
-  const done = String(flags.done ?? "").split("|").map((item) => item.trim()).filter(Boolean);
-  if (done.length === 0) throw new AirlockError("init requires at least one testable done criterion via --done \"criterion|criterion\"");
-  await mkdir(path.dirname(planPath), { recursive: true });
-  const plan = {
-    schema: SCHEMA,
-    goal: requireValue(goal, "goal"),
-    done,
-    nonGoals: [],
-    created: now(),
-    budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2) },
-    tasks: [],
-    decisions: [],
-  };
-  validatePlan(plan);
-  writePlan(planPath, plan);
+  const existing = existsSync(planPath);
+  if (existing && flags.host !== "opencode") throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
+  let plan;
+  if (existing) {
+    plan = readPlan(planPath);
+  } else {
+    const done = String(flags.done ?? "").split("|").map((item) => item.trim()).filter(Boolean);
+    if (done.length === 0) throw new AirlockError("init requires at least one testable done criterion via --done \"criterion|criterion\"");
+    await mkdir(path.dirname(planPath), { recursive: true });
+    plan = {
+      schema: SCHEMA,
+      goal: requireValue(goal, "goal"),
+      done,
+      nonGoals: [],
+      created: now(),
+      budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2) },
+      tasks: [],
+      decisions: [],
+    };
+    validatePlan(plan);
+    writePlan(planPath, plan);
+  }
   const modelPath = path.join(root, ".airlock", "models.json");
   if (!existsSync(modelPath)) {
     await mkdir(path.dirname(modelPath), { recursive: true });
     await writeFile(modelPath, `${JSON.stringify(DEFAULT_MODELS, null, 2)}\n`, "utf8");
   }
+  const bootstrap = flags.host === "opencode" ? await bootstrapOpenCode(root, loadModels(root)) : [];
   if (existsSync(path.join(root, ".git"))) {
-    const paths = [planPath, modelPath].filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
+    const paths = [planPath, modelPath, ...bootstrap].filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
     git(root, ["add", "--", ...paths]);
   }
   return plan;

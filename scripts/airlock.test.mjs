@@ -55,6 +55,11 @@ test("owns supports exact paths, directories, and globs", () => {
   assert.equal(ownsPath(["src/*.js"], "src/nested/a.js"), false);
 });
 
+test("owns folds case on case-insensitive hosts", { skip: !["win32", "darwin"].includes(process.platform) }, () => {
+  assert.equal(ownsPath(["src/a.js"], "src/A.js"), true);
+  assert.equal(ownsPath(["Src/A.js"], "src/a.js"), true);
+});
+
 test("schema rejects cycles, missing evidence, and blocking doing tasks", () => {
   const task = (id, dependsOn = []) => ({
     id,
@@ -92,6 +97,19 @@ test("init state does not poison the first task boundary", async (t) => {
   const plan = await readPlan(root);
   plan.tasks.push({ id: "T1", title: "First task", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null });
   await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+});
+
+test("OpenCode bootstrap installs missing command and bindings without replacing the plan", async (t) => {
+  const task = { id: "T1", title: "Bootstrap", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  const before = await readFile(path.join(root, "airlock.plan.json"), "utf8");
+  const result = run(root, ["init", "--host", "opencode"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(await readFile(path.join(root, "airlock.plan.json"), "utf8"), before);
+  assert.match(await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8"), /airlock next --host opencode/);
+  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-builder-glm.md"), "utf8"), /model: zai-coding-plan\/glm-5\.3/);
+  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-browser-sol.md"), "utf8"), /model: openai\/gpt-5\.6-sol/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
@@ -399,5 +417,6 @@ test("prompt surface contains only the slim roles and two shims", async () => {
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
   assert.ok(packageJson.files.includes("scripts/airlock.mjs"));
+  assert.ok(packageJson.files.includes(".opencode/command/airlock.md"));
   assert.match(await readFile(path.join(root, ".opencode/command/airlock.md"), "utf8"), /npm install --global github:ivan-tretyakov\/airlock#v3\.0\.0/);
 });

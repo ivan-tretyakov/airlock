@@ -17,6 +17,7 @@
     "scripts/airlock.mjs",
     "roles",
     ".airlock/models.json",
+    ".opencode/command/airlock.md",
     "opencode.json",
     "README.md",
     "LICENSE"

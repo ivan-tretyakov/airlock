@@ -52,6 +52,14 @@ npm install --global github:ivan-tretyakov/airlock#v3.0.0
 
 For local development, run `npm link` in this checkout.
 
+Bootstrap an OpenCode project without merging its existing configuration:
+
+```text
+airlock init "Add an export command" --done "npm test passes" --host opencode
+```
+
+This adds the `/airlock` command and six model-bound Airlock agents under `.opencode/`. Re-run the same command after a global upgrade to add missing bindings; existing plan, command, and agent files are not overwritten.
+
 The host surface is one command each: `commands/airlock.md` and `.opencode/command/airlock.md`. There are no hooks, guard plugins, external launchers, ledgers, or lifecycle templates.
 
 ## Validation
