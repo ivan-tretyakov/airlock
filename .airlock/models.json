@@ -1,0 +1,26 @@
+{
+  "claude": {
+    "light": "haiku",
+    "standard": "sonnet",
+    "complex": "sonnet",
+    "critical": "opus"
+  },
+  "opencode": {
+    "light": "zai-coding-plan/glm-5.3",
+    "standard": "zai-coding-plan/glm-5.3",
+    "complex": "zai-coding-plan/glm-5.3",
+    "critical": "openai/gpt-5.6-sol"
+  },
+  "opencodeAgents": {
+    "zai-coding-plan/glm-5.3": {
+      "builder": "airlock-builder-glm",
+      "checker": "airlock-checker-glm",
+      "browser": "airlock-browser-glm"
+    },
+    "openai/gpt-5.6-sol": {
+      "builder": "airlock-builder-sol",
+      "checker": "airlock-checker-sol",
+      "browser": "airlock-browser-sol"
+    }
+  }
+}

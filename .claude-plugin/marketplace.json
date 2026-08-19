@@ -1,6 +1,6 @@
 {
   "name": "airlock-marketplace",
-  "description": "Opt-in adaptive development orchestration for Claude Code and Cowork.",
+  "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
   "owner": {
     "name": "Ivan Tretyakov"
   },
@@ -8,8 +8,8 @@
     {
       "name": "airlock",
       "source": "./",
-      "description": "Explicit activation, adaptive workflow weight, leaf-only delegation, and evidence where risk requires it.",
-      "version": "2.6.0"
+      "description": "One plan file, slim roles, host-neutral audit, and native multimodel dispatch.",
+      "version": "3.0.0"
     }
   ]
 }
