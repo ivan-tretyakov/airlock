@@ -12,28 +12,6 @@ const RISKS = new Set(["light", "standard", "complex", "critical"]);
 const STATUSES = new Set(["todo", "doing", "blocked", "needs-you", "done"]);
 const DECISION_MODES = new Set(["assume", "block"]);
 const BLOCKING_CASES = new Set(["irreversible", "external", "access", "rework", "goal"]);
-const DEFAULT_MODELS = {
-  claude: { light: "haiku", standard: "sonnet", complex: "sonnet", critical: "opus" },
-  opencode: {
-    light: "zai-coding-plan/glm-5.3",
-    standard: "zai-coding-plan/glm-5.3",
-    complex: "zai-coding-plan/glm-5.3",
-    critical: "openai/gpt-5.6-sol",
-  },
-  opencodeAgents: {
-    "zai-coding-plan/glm-5.3": {
-      builder: "airlock-builder-glm",
-      checker: "airlock-checker-glm",
-      browser: "airlock-browser-glm",
-    },
-    "openai/gpt-5.6-sol": {
-      builder: "airlock-builder-sol",
-      checker: "airlock-checker-sol",
-      browser: "airlock-browser-sol",
-    },
-  },
-};
-
 class AirlockError extends Error {
   constructor(message, exitCode = 1) {
     super(message);
@@ -150,7 +128,7 @@ function validatePlan(plan) {
     if (!isNonEmptyString(task.title)) throw new AirlockError(`task ${task.id} requires title`);
     if (!ROLES.has(task.role)) throw new AirlockError(`task ${task.id} has invalid role: ${task.role}`);
     if (!RISKS.has(task.risk)) throw new AirlockError(`task ${task.id} has invalid risk: ${task.risk}`);
-    if (task.model !== undefined && !isNonEmptyString(task.model)) throw new AirlockError(`task ${task.id} model must be a non-empty string`);
+    if (task.model !== undefined) throw new AirlockError(`task ${task.id} model is not supported; configure routing locally by role and risk`);
     assertArrayOfStrings(task.owns, `task ${task.id} owns`, 1);
     if (task.owns.some((owned) => path.isAbsolute(owned) || normalizePath(owned).startsWith("../"))) {
       throw new AirlockError(`task ${task.id} owns must be repository-relative paths or globs`);
@@ -263,33 +241,74 @@ function writePlan(planPath, plan) {
   renameSync(temporary, planPath);
 }
 
-function loadModels(root) {
-  const configPath = path.join(root, ".airlock", "models.json");
-  if (!existsSync(configPath)) return structuredClone(DEFAULT_MODELS);
-  const models = readJson(configPath, "model configuration");
+function userConfigDir() {
+  if (isNonEmptyString(process.env.AIRLOCK_CONFIG_DIR)) return path.resolve(process.env.AIRLOCK_CONFIG_DIR);
+  if (isNonEmptyString(process.env.XDG_CONFIG_HOME)) return path.join(process.env.XDG_CONFIG_HOME, "airlock");
+  const homeConfig = path.join(process.env.HOME ?? process.env.USERPROFILE ?? process.cwd(), ".config", "airlock");
+  if (existsSync(path.dirname(homeConfig))) return homeConfig;
+  if (process.platform === "darwin") return path.join(process.env.HOME ?? process.env.USERPROFILE ?? process.cwd(), "Library", "Application Support", "airlock");
+  if (process.platform === "win32" && isNonEmptyString(process.env.APPDATA)) return path.join(process.env.APPDATA, "airlock");
+  return homeConfig;
+}
+
+function userConfigPath() {
+  return isNonEmptyString(process.env.AIRLOCK_CONFIG) ? path.resolve(process.env.AIRLOCK_CONFIG) : path.join(userConfigDir(), "models.json");
+}
+
+function projectConfigPath(root) {
+  const common = git(root, ["rev-parse", "--git-common-dir"]).trim();
+  return path.resolve(root, common, "airlock", "models.json");
+}
+
+function mergeRoutes(base, override) {
+  const merged = structuredClone(base);
   for (const host of ["claude", "opencode"]) {
-    if (!models[host] || typeof models[host] !== "object") throw new AirlockError(`model configuration requires ${host}`);
-    for (const risk of RISKS) if (!isNonEmptyString(models[host][risk])) throw new AirlockError(`model configuration requires ${host}.${risk}`);
-  }
-  for (const model of new Set(Object.values(models.opencode))) {
-    for (const role of ROLES) {
-      if (!isNonEmptyString(models.opencodeAgents?.[model]?.[role])) throw new AirlockError(`model configuration requires opencodeAgents.${model}.${role}`);
+    for (const [role, risks] of Object.entries(override[host] ?? {})) {
+      merged[host] ??= {};
+      merged[host][role] ??= {};
+      Object.assign(merged[host][role], risks);
     }
   }
-  return models;
+  return merged;
+}
+
+function readRoutes(configPath) {
+  if (!existsSync(configPath)) return { version: 1, claude: {}, opencode: {} };
+  const routes = readJson(configPath, "local model configuration");
+  if (routes.version !== 1) throw new AirlockError(`local model configuration at ${configPath} requires version 1`);
+  for (const host of ["claude", "opencode"]) {
+    if (routes[host] !== undefined && (!routes[host] || typeof routes[host] !== "object" || Array.isArray(routes[host]))) throw new AirlockError(`local model configuration at ${configPath} has invalid ${host}`);
+  }
+  return { version: 1, claude: routes.claude ?? {}, opencode: routes.opencode ?? {} };
+}
+
+function loadRoutes(root) {
+  const user = readRoutes(userConfigPath());
+  if (!existsSync(path.join(root, ".git"))) return user;
+  const project = readRoutes(projectConfigPath(root));
+  return mergeRoutes(user, project);
+}
+
+function routeFor(task, root, host) {
+  if (!["claude", "opencode"].includes(host)) throw new AirlockError(`unsupported host: ${host}`);
+  const route = loadRoutes(root)[host]?.[task.role]?.[task.risk];
+  if (!route || !isNonEmptyString(route.model) || !isNonEmptyString(route.effort)) {
+    throw new AirlockError(`missing local route for ${host}/${task.role}/${task.risk}; configure it with airlock configure`);
+  }
+  return route;
+}
+
+function agentName(role, route) {
+  const slug = `${route.model}-${route.effort}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return `airlock-${role}-${slug}`;
 }
 
 function resolveModel(task, root, host) {
-  if (task.model) return task.model;
-  if (!["claude", "opencode"].includes(host)) throw new AirlockError(`unsupported host: ${host}`);
-  return loadModels(root)[host][task.risk];
+  return routeFor(task, root, host).model;
 }
 
 function resolveOpenCodeAgent(task, root) {
-  const models = loadModels(root);
-  const agent = models.opencodeAgents?.[resolveModel(task, root, "opencode")]?.[task.role];
-  if (!isNonEmptyString(agent)) throw new AirlockError(`model configuration requires an OpenCode agent for ${task.role}/${resolveModel(task, root, "opencode")}`);
-  return agent;
+  return agentName(task.role, routeFor(task, root, "opencode"));
 }
 
 function git(root, args, options = {}) {
@@ -383,7 +402,7 @@ function decisionSummary(decision) {
 }
 
 function isExpensive(task, root, host) {
-  return resolveModel(task, root, host) === loadModels(root)[host].critical;
+  return task.risk === "critical";
 }
 
 function budgetState(plan, root, host) {
@@ -445,7 +464,7 @@ function nextText(root, plan, host) {
   if (!task.owns?.length) throw new AirlockError(`task ${task.id} has no owns paths`);
   if (!isNonEmptyString(task.acceptance)) throw new AirlockError(`task ${task.id} has no acceptance`);
   const lines = [
-    `TASK ${task.id} · ${task.role} · ${resolveModel(task, root, host)}`,
+    `TASK ${task.id} · ${task.role} · ${resolveModel(task, root, host)} · ${routeFor(task, root, host).effort}`,
     `GOAL  ${plan.goal}`,
     `DO    ${task.title}${resumed ? " (resume)" : ""}`,
     `OWNS  ${task.owns[0]}`,
@@ -555,7 +574,37 @@ function roleBody(role) {
   return readFileSync(rolePath, "utf8").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
-async function bootstrapOpenCode(root, models) {
+function openCodeConfigDir() {
+  if (isNonEmptyString(process.env.OPENCODE_CONFIG_DIR)) return path.resolve(process.env.OPENCODE_CONFIG_DIR);
+  const homeConfig = path.join(process.env.HOME ?? process.env.USERPROFILE ?? process.cwd(), ".config", "opencode");
+  if (existsSync(homeConfig)) return homeConfig;
+  if (isNonEmptyString(process.env.XDG_CONFIG_HOME)) return path.join(process.env.XDG_CONFIG_HOME, "opencode");
+  if (process.platform === "win32" && isNonEmptyString(process.env.APPDATA)) return path.join(process.env.APPDATA, "opencode");
+  return homeConfig;
+}
+
+async function syncOpenCodeAgents(routes) {
+  const created = [];
+  for (const [role, risks] of Object.entries(routes.opencode)) {
+    if (!ROLES.has(role)) throw new AirlockError(`local model configuration has invalid OpenCode role: ${role}`);
+    for (const [risk, route] of Object.entries(risks)) {
+      if (!RISKS.has(risk) || !isNonEmptyString(route?.model) || !isNonEmptyString(route?.effort)) {
+        throw new AirlockError(`local model configuration has invalid OpenCode route: ${role}/${risk}`);
+      }
+      const name = agentName(role, route);
+      const agentPath = path.join(openCodeConfigDir(), "agent", `${name}.md`);
+      if (existsSync(agentPath)) continue;
+      const permission = role === "builder" ? "" : "permission:\n  edit: deny\n";
+      const markdown = `---\ndescription: Airlock ${role} on ${route.model} at ${route.effort} effort.\nmode: subagent\nmodel: ${route.model}\nvariant: ${route.effort}\n${permission}---\n\n${roleBody(role)}`;
+      await mkdir(path.dirname(agentPath), { recursive: true });
+      await writeFile(agentPath, markdown, "utf8");
+      created.push(agentPath);
+    }
+  }
+  return created;
+}
+
+async function bootstrapOpenCode(root) {
   const created = [];
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const commandPath = path.join(root, ".opencode", "command", "airlock.md");
@@ -563,18 +612,6 @@ async function bootstrapOpenCode(root, models) {
     await mkdir(path.dirname(commandPath), { recursive: true });
     await writeFile(commandPath, readFileSync(path.join(sourceRoot, ".opencode", "command", "airlock.md"), "utf8"), "utf8");
     created.push(commandPath);
-  }
-  for (const [model, bindings] of Object.entries(models.opencodeAgents)) {
-    for (const role of ROLES) {
-      const name = bindings[role];
-      const agentPath = path.join(root, ".opencode", "agent", `${name}.md`);
-      if (existsSync(agentPath)) continue;
-      const permission = role === "builder" ? "" : "permission:\n  edit: deny\n";
-      const markdown = `---\ndescription: Airlock ${role} on ${model}.\nmode: subagent\nmodel: ${model}\n${permission}---\n\n${roleBody(role)}`;
-      await mkdir(path.dirname(agentPath), { recursive: true });
-      await writeFile(agentPath, markdown, "utf8");
-      created.push(agentPath);
-    }
   }
   return created;
 }
@@ -602,17 +639,32 @@ async function initPlan(root, planPath, goal, flags) {
     validatePlan(plan);
     writePlan(planPath, plan);
   }
-  const modelPath = path.join(root, ".airlock", "models.json");
-  if (!existsSync(modelPath)) {
-    await mkdir(path.dirname(modelPath), { recursive: true });
-    await writeFile(modelPath, `${JSON.stringify(DEFAULT_MODELS, null, 2)}\n`, "utf8");
-  }
-  const bootstrap = flags.host === "opencode" ? await bootstrapOpenCode(root, loadModels(root)) : [];
+  const bootstrap = flags.host === "opencode" ? await bootstrapOpenCode(root) : [];
   if (existsSync(path.join(root, ".git"))) {
-    const paths = [planPath, modelPath, ...bootstrap].filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
+    const paths = [planPath, ...bootstrap].filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
     git(root, ["add", "--", ...paths]);
   }
   return plan;
+}
+
+async function configureRoute(root, flags) {
+  const host = requireValue(flags.host, "--host");
+  const role = requireValue(flags.role, "--role");
+  const risk = requireValue(flags.risk, "--risk");
+  const model = requireValue(flags.model, "--model");
+  const effort = requireValue(flags.effort, "--effort");
+  if (!["claude", "opencode"].includes(host)) throw new AirlockError(`unsupported host: ${host}`);
+  if (!ROLES.has(role)) throw new AirlockError(`invalid role: ${role}`);
+  if (!RISKS.has(risk)) throw new AirlockError(`invalid risk: ${risk}`);
+  if (flags.project && !existsSync(path.join(root, ".git"))) throw new AirlockError("--project requires a Git repository");
+  const configPath = flags.project ? projectConfigPath(root) : userConfigPath();
+  const routes = readRoutes(configPath);
+  routes[host][role] ??= {};
+  routes[host][role][risk] = { model, effort };
+  await mkdir(path.dirname(configPath), { recursive: true });
+  await writeFile(configPath, `${JSON.stringify(routes, null, 2)}\n`, "utf8");
+  const created = host === "opencode" ? await syncOpenCodeAgents(loadRoutes(root)) : [];
+  return { configPath, created };
 }
 
 function importLedger(root, planPath, ledgerPath) {
@@ -641,7 +693,7 @@ function importLedger(root, planPath, ledgerPath) {
 }
 
 function help() {
-  return "Usage: airlock <init|next|start|done|block|ask|answer|status|audit|render|import> [arguments] [--plan path] [--host claude|opencode] [--json]";
+  return "Usage: airlock <init|config|next|start|done|block|ask|answer|status|audit|render|import> [arguments] [--plan path] [--host claude|opencode] [--json]";
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -651,6 +703,11 @@ async function main(argv = process.argv.slice(2)) {
   const root = findRoot();
   const host = flags.host ?? process.env.AIRLOCK_HOST ?? "claude";
   const defaultPlanPath = flags.plan ? path.resolve(flags.plan) : path.join(root, "airlock.plan.json");
+  if (command === "config") {
+    if (positional.length) throw new AirlockError(`config accepts no positional arguments: ${positional.join(" ")}`);
+    const result = await configureRoute(root, flags);
+    return output({ text: `CONFIGURED ${result.configPath}${result.created.length ? `\nGENERATED\n${result.created.map((item) => `  ${item}`).join("\n")}` : ""}`, ...result }, flags.json);
+  }
   if (command === "init") {
     const planPath = flags.plan ? path.resolve(flags.plan) : defaultPlanPath;
     const plan = await initPlan(root, planPath, positional.join(" "), flags);
