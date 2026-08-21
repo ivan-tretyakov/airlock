@@ -14,8 +14,13 @@ const STATUSES = new Set(["todo", "doing", "blocked", "needs-you", "done"]);
 const DECISION_MODES = new Set(["assume", "block"]);
 const BLOCKING_CASES = new Set(["irreversible", "external", "access", "rework", "goal"]);
 const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const FALLBACK_CLASSES = new Set(["auth", "rate-limit", "timeout", "transport", "model-unavailable"]);
+const MAX_FALLBACK_ADVANCES = 2;
 const OFFER_PIN_TTL_MS = 5 * 60 * 1000;
-const LEGACY_OPENCODE_COMMAND_HASHES = new Set(["93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e"]);
+const LEGACY_OPENCODE_COMMAND_HASHES = new Set([
+  "93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e",
+  "e0073a668602070e7cb2e9a78c916a75628848bcf2a23f2c8e930b8b69f54997",
+]);
 let commandTimestamp = null;
 let clockOverride = false;
 class AirlockError extends Error {
@@ -300,6 +305,7 @@ function validateFallbacks(fallbacks, primary, label, version) {
   if (fallbacks === undefined) return [];
   if (version < 3) throw new AirlockError(`${label} fallbacks require version 3`);
   if (!Array.isArray(fallbacks) || fallbacks.length === 0) throw new AirlockError(`${label} fallbacks must be a non-empty array`);
+  if (fallbacks.length > MAX_FALLBACK_ADVANCES) throw new AirlockError(`${label} fallbacks cannot exceed ${MAX_FALLBACK_ADVANCES} candidates`);
   const normalized = fallbacks.map((candidate, index) => validateCandidate(candidate, `${label} fallbacks[${index}]`));
   const seen = new Set([`${primary.model}\0${primary.effort}`]);
   for (const candidate of normalized) {
@@ -455,17 +461,22 @@ function pinKey(root, planPath, task, host) {
 
 function readRouterState(root) {
   const statePath = routerStatePath(root);
-  if (!existsSync(statePath)) return { version: 2, pins: {} };
+  if (!existsSync(statePath)) return { version: 2, pins: {}, completed: {} };
   const state = readJson(statePath, "local router state");
   if (![1, 2].includes(state.version) || !state.pins || typeof state.pins !== "object" || Array.isArray(state.pins)) throw new AirlockError(`invalid local router state: ${statePath}`);
-  return { version: 2, pins: Object.fromEntries(Object.entries(state.pins).map(([key, pin]) => [key, normalizePin(pin)])) };
+  if (state.completed !== undefined && (!state.completed || typeof state.completed !== "object" || Array.isArray(state.completed))) throw new AirlockError(`invalid local router state completed records: ${statePath}`);
+  return {
+    version: 2,
+    pins: Object.fromEntries(Object.entries(state.pins).map(([key, pin]) => [key, normalizePin(pin)])),
+    completed: Object.fromEntries(Object.entries(state.completed ?? {}).map(([key, pin]) => [key, normalizePin(pin)])),
+  };
 }
 
 function writeRouterState(root, state) {
   const statePath = routerStatePath(root);
   mkdirSync(path.dirname(statePath), { recursive: true });
   const temporary = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ ...state, version: 2 }, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify({ ...state, version: 2, completed: state.completed ?? {} }, null, 2)}\n`, "utf8");
   renameSync(temporary, statePath);
 }
 
@@ -506,6 +517,32 @@ function clearRoutePins(root, planPath, task, host = null) {
   const state = readRouterState(root);
   let changed = false;
   for (const selectedHost of host ? [host] : ["claude", "opencode"]) {
+    const key = pinKey(root, planPath, task, selectedHost);
+    if (!state.pins[key]) continue;
+    delete state.pins[key];
+    changed = true;
+  }
+  if (changed) writeRouterState(root, state);
+}
+
+function completeRoutePin(root, planPath, task, host, commit) {
+  const state = readRouterState(root);
+  const selectedKey = pinKey(root, planPath, task, host);
+  const selected = state.pins[selectedKey];
+  let changed = false;
+  if (selected) {
+    state.completed[`${task.id}:${commit}:${host}`] = {
+      ...normalizePin(selected),
+      taskId: task.id,
+      host,
+      commit,
+      worktree: normalizePath(path.resolve(root)),
+      planPath: normalizePath(path.resolve(planPath)),
+      completedAt: commandNow(),
+    };
+    changed = true;
+  }
+  for (const selectedHost of ["claude", "opencode"]) {
     const key = pinKey(root, planPath, task, selectedHost);
     if (!state.pins[key]) continue;
     delete state.pins[key];
@@ -674,25 +711,25 @@ function decisionSummary(decision) {
   return `${decision.id}  ${decision.question}  assumed: ${decision.assumed}   used by ${decision.consumedBy.join(", ") || "none"}`;
 }
 
-function isExpensive(task, root, host) {
+function isExpensive(task) {
   return task.risk === "critical";
 }
 
-function budgetState(plan, root, host) {
+function budgetState(plan) {
   const completed = plan.tasks.filter((task) => task.status === "done").length;
   if (completed >= plan.budget.maxTasks) return "task";
-  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task, root, host)).length;
+  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task)).length;
   return expensive >= plan.budget.maxExpensive ? "expensive" : null;
 }
 
-function selectNext(plan, root, host) {
+function selectNext(plan) {
   if (goalBlockingDecision(plan)) return null;
   const doing = plan.tasks.filter((task) => task.status === "doing");
   if (doing.length === 1) return { task: doing[0], resumed: true };
   if (plan.tasks.filter((task) => task.status === "done").length >= plan.budget.maxTasks) return null;
   const tasks = eligibleTasks(plan);
-  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task, root, host)).length;
-  const canRun = (task) => !isExpensive(task, root, host) || expensive < plan.budget.maxExpensive;
+  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task)).length;
+  const canRun = (task) => !isExpensive(task) || expensive < plan.budget.maxExpensive;
   const withoutDecisions = tasks.find((task) => openDecisionsFor(plan, task.id).length === 0 && canRun(task));
   if (withoutDecisions) return { task: withoutDecisions, resumed: false };
   const assumed = tasks.find((task) => openDecisionsFor(plan, task.id).every((decision) => (decision.mode ?? "assume") === "assume") && canRun(task));
@@ -747,11 +784,11 @@ function taskText(root, plan, host, planPath, task, resumed) {
 function nextText(root, plan, host, planPath = null) {
   const goalDecision = goalBlockingDecision(plan);
   if (goalDecision) return { text: `NOTHING TO DO\nWaiting on ${goalDecision.id}.`, selected: null, parked: [goalDecision] };
-  const selected = selectNext(plan, root, host);
+  const selected = selectNext(plan);
   if (!selected) {
     const openBlocking = plan.decisions.filter((decision) => decision.status === "open" && (decision.mode ?? "assume") === "block");
     if (plan.tasks.every((task) => task.status === "done")) return { text: "NOTHING TO DO\nAll tasks are done.", selected: null };
-    const budget = budgetState(plan, root, host);
+    const budget = budgetState(plan);
     if (budget) return { text: `NOTHING TO DO\nBUDGET REACHED: ${budget === "task" ? "maxTasks" : "maxExpensive"}.`, selected: null };
     if (openBlocking.length) return { text: `NOTHING TO DO\nWaiting on ${openBlocking.map((item) => item.id).join(", ")}.`, selected: null, parked: openBlocking };
     return { text: "NOTHING TO DO\nAll remaining tasks are blocked.", selected: null };
@@ -774,12 +811,12 @@ function statusText(root, plan, host, planPath = null) {
     return `  ${task.id}  ${task.title}                  ${task.role}/${route.model} · ${routeState(route)}${attempts}   ${formatDuration(task.startedAt)}`;
   }));
   if (blocked.length) lines.push("BLOCKED", ...blocked.map((task) => `  ${task.id}  ${task.title}             ${task.note ?? "waiting on a decision"}`));
-  const next = selectNext(plan, root, host);
+  const next = selectNext(plan);
   if (next && !next.resumed) {
     const route = routeFor(next.task, root, host, planPath);
     lines.push("NEXT", `  ${next.task.id}  ${next.task.title}                  ${next.task.role}/${route.model} · ${routeState(route)}`);
   }
-  if (!next && !plan.tasks.every((task) => task.status === "done") && budgetState(plan, root, host)) lines.push("BUDGET", `  ${budgetState(plan, root, host) === "task" ? "maxTasks" : "maxExpensive"} reached`);
+  if (!next && !plan.tasks.every((task) => task.status === "done") && budgetState(plan)) lines.push("BUDGET", `  ${budgetState(plan) === "task" ? "maxTasks" : "maxExpensive"} reached`);
   return lines.join("\n");
 }
 
@@ -821,8 +858,10 @@ function auditTask(root, planPath, task, range, plan) {
   return { changed, inScope, outOfScope, foreign };
 }
 
-function advanceRouteFallback(root, planPath, plan, task, host, rawReason) {
+function advanceRouteFallback(root, planPath, plan, task, host, rawClass, rawReason) {
   if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot fallback from ${task.status}`);
+  const failureClass = requireValue(rawClass, "--class");
+  if (!FALLBACK_CLASSES.has(failureClass)) throw new AirlockError(`--class must be one of: ${[...FALLBACK_CLASSES].join(" | ")}`);
   const reason = requireValue(rawReason, "--reason").replace(/\s+/g, " ").trim().slice(0, 240);
   const audit = auditTask(root, planPath, task, undefined, plan);
   if (audit.inScope.length || audit.outOfScope.length) {
@@ -835,9 +874,10 @@ function advanceRouteFallback(root, planPath, plan, task, host, rawReason) {
   if (!pin) throw new AirlockError(`task ${task.id} has no pinned ${host} route`);
   const nextIndex = pin.candidateIndex + 1;
   if (nextIndex >= pin.candidates.length) throw new AirlockError(`NO FALLBACK for ${task.id}: route ${pin.name} exhausted ${pin.candidates.length} candidate${pin.candidates.length === 1 ? "" : "s"}`);
+  if (nextIndex > MAX_FALLBACK_ADVANCES) throw new AirlockError(`FALLBACK LIMIT for ${task.id}: at most ${MAX_FALLBACK_ADVANCES} advances are allowed`);
   const next = pin.candidates[nextIndex];
   assertRouteAgent(root, task, host, next);
-  const failure = { candidateIndex: pin.candidateIndex, model: pin.model, effort: pin.effort, agent: pin.agent, reason, failedAt: commandNow() };
+  const failure = { candidateIndex: pin.candidateIndex, model: pin.model, effort: pin.effort, agent: pin.agent, class: failureClass, reason, failedAt: commandNow() };
   const updated = { ...pin, ...next, candidateIndex: nextIndex, agent: next.agent ?? agentName(task.role, next), failures: [...pin.failures, failure], expiresAt: null };
   state.pins[key] = updated;
   writeRouterState(root, state);
@@ -1003,8 +1043,8 @@ async function bootstrapOpenCode(root) {
     if (LEGACY_OPENCODE_COMMAND_HASHES.has(contentHash(current))) {
       await writeFile(commandPath, source, "utf8");
       created.push(commandPath);
-    } else if (!current.includes("airlock fallback <id>")) {
-      throw new AirlockError(`custom OpenCode Airlock command lacks fallback support: ${commandPath}; merge the current packaged command manually`);
+    } else if (!current.includes("--class <class>")) {
+      throw new AirlockError(`custom OpenCode Airlock command lacks classified fallback support: ${commandPath}; merge the current packaged command manually`);
     }
   }
   return created;
@@ -1160,7 +1200,7 @@ async function main(argv = process.argv.slice(2)) {
   const plan = readPlan(planPath);
   if (command === "next") {
     if (positional.length) throw new AirlockError(`next accepts no positional arguments: ${positional.join(" ")}`);
-    const selected = selectNext(plan, root, host);
+    const selected = selectNext(plan);
     clearInactiveRoutePins(root, planPath, plan, host, selected?.task ?? null);
     if (selected) {
       assertSelectedAgent(root, selected.task, host, planPath);
@@ -1205,7 +1245,7 @@ async function main(argv = process.argv.slice(2)) {
     const task = taskById(plan, requireValue(positional[0], "task id"));
     if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot fallback from ${task.status}`);
     ensureRoutePin(root, planPath, task, host);
-    const route = advanceRouteFallback(root, planPath, plan, task, host, flags.reason);
+    const route = advanceRouteFallback(root, planPath, plan, task, host, flags.class, flags.reason);
     const text = [`FALLBACK ${task.id} · candidate ${route.candidateIndex + 1}/${route.candidates.length}`, taskText(root, plan, host, planPath, task, true)].join("\n");
     return output({ text, task, route: routeOutput(task, { ...route, pinned: true }) }, flags.json);
   }
@@ -1243,7 +1283,7 @@ async function main(argv = process.argv.slice(2)) {
       git(root, ["reset", "--", relativePlan(root, planPath)]);
       throw error;
     }
-    clearRoutePins(root, planPath, task);
+    completeRoutePin(root, planPath, task, host, commit);
     return output({ text: `DONE ${task.id} ${commit}`, task, commit }, flags.json);
   }
   if (command === "block") {

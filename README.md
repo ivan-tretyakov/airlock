@@ -28,7 +28,7 @@ The command writes user-local configuration by default. Add `--project` to write
 
 `next` pins an offered route for five minutes so the normal `next` to `start` loop is stable without holding a stale time-window route indefinitely. `status` shows the live offered pin; after expiry, both commands preview or select the current route. A doing task keeps its time-selected chain until `done` or `block`, including across schedule boundaries. When `AIRLOCK_NOW` is used for deterministic testing, route output includes an explicit `CLOCK OVERRIDE` marker.
 
-Fallbacks require configuration version 3 and are complete per binding: a window does not inherit its default route's fallbacks. Airlock tries no candidate automatically. When a host dispatch fails before returning any child result, `airlock fallback <task-id> --host <host> --reason "<cause>"` advances the local pin by one candidate and emits a fresh TASK block. It refuses if the failed attempt changed task-owned or out-of-scope files, if the task is not doing, or if the chain is exhausted.
+Fallbacks require configuration version 3 and are complete per binding: a window does not inherit its default route's fallbacks. A binding may have at most two fallbacks, and Airlock tries none automatically. When a host dispatch errors before returning any child result, `airlock fallback <task-id> --host <host> --class <class> --reason "<cause>"` advances once and emits a fresh TASK block. Class must be `auth`, `rate-limit`, `timeout`, `transport`, or `model-unavailable`; it is retained with the local failure record. Airlock refuses changed worktrees, non-doing tasks, and exhausted chains.
 
 ```json
 {
@@ -67,7 +67,7 @@ Utilities: `init`, `answer`, `render`, `import`.
 
 All commands support `--json`; use `--plan <path>` when a repository has more than one delivery plan, and `--host claude|opencode` when resolving models outside a host shim.
 
-`start` requires a clean product worktree, excluding Airlock's own plan and `.airlock/` configuration. After `audit` succeeds, `done --evidence "<command + result>"` commits the exact owned changes and the plan state with an `Airlock-Task` trailer. A failed commit restores the task to `doing` so it can be retried.
+`start` requires a clean product worktree, excluding Airlock's own plan and `.airlock/` configuration. After `audit` succeeds, `done --evidence "<command + result>"` commits the exact owned changes and the plan state with an `Airlock-Task` trailer. A failed commit restores the task to `doing` so it can be retried. A successful commit moves its route and fallback history into the local router state's `completed` map, keyed by task, commit, and host; model assignments remain outside the repository.
 
 Blocked task deltas and `audit --revert-out-of-scope` recoveries are retained under `refs/airlock/blocked/...` and `refs/airlock/reverted/...`; they are never deleted. Recover with `git stash apply <reported-ref>`; inspect untracked recovery files through `<reported-ref>^3`.
 
@@ -111,7 +111,7 @@ claude plugin validate .claude-plugin/marketplace.json --strict
 
 The automated tests cover schema invariants, lifecycle transitions, time windows and fallback chains, assumption rework, Git audits including shell-created writes, role-model binding consistency, and the 5,000-byte prompt-surface ceiling.
 
-`--unattended` forwards to `next`; a blocking decision returns `PARKED` and ends the run without prompting. `maxExpensive` caps tasks using the host's critical model. Parallel writers require `--parallel` and disjoint ownership; overlapping or ambiguous glob prefixes remain serialized.
+`--unattended` forwards to `next`; a blocking decision returns `PARKED` and ends the run without prompting. `maxExpensive` caps tasks declared with `risk: critical`; it deliberately does not infer provider cost from local routes or fallback candidates. Parallel writers require `--parallel` and disjoint ownership; overlapping or ambiguous glob prefixes remain serialized.
 
 ## Migration
 
@@ -134,7 +134,7 @@ Preserve the file's existing `claude` and `opencode` sections when adding `catal
 
 ### Adding ordered fallbacks
 
-Version 3 adds `fallbacks` to static routes and individual windows. Every candidate must declare a legal host effort or OpenCode variant. Airlock 3.0 and earlier 3.1 builds reject version 3 rather than silently dropping failover behavior. Router-state version 1 pins are read as one-candidate chains and are upgraded locally on the next state write.
+Version 3 adds up to two `fallbacks` to static routes and individual windows. Every candidate must declare a legal host effort or OpenCode variant. Airlock 3.0 and earlier 3.1 builds reject version 3 rather than silently dropping failover behavior. Router-state version 1 pins are read as one-candidate chains and are upgraded locally on the next state write.
 
 ### Importing from 2.x
 

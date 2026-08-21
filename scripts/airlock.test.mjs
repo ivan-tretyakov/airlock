@@ -178,10 +178,16 @@ test("OpenCode bootstrap upgrades only the exact legacy command shim", async (t)
   assert.equal(upgraded.status, 0, upgraded.stderr);
   assert.match(await readFile(commandPath, "utf8"), /airlock fallback <id>/);
 
+  const fallbackFixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-command-3.1.0-fallback.md");
+  await writeFile(commandPath, await readFile(fallbackFixture, "utf8"));
+  const upgradedFallback = run(root, ["init", "--host", "opencode"]);
+  assert.equal(upgradedFallback.status, 0, upgradedFallback.stderr);
+  assert.match(await readFile(commandPath, "utf8"), /--class <class>/);
+
   await writeFile(commandPath, "custom stale command\n");
   const custom = run(root, ["init", "--host", "opencode"]);
   assert.equal(custom.status, 1);
-  assert.match(custom.stderr, /custom OpenCode Airlock command lacks fallback support/);
+  assert.match(custom.stderr, /custom OpenCode Airlock command lacks classified fallback support/);
   assert.equal(await readFile(commandPath, "utf8"), "custom stale command\n");
 });
 
@@ -420,7 +426,7 @@ test("next rejects unrecognised positional input", async (t) => {
   assert.match(result.stderr, /accepts no positional arguments/);
 });
 
-test("critical-model budget parks expensive work while allowing cheap work", async (t) => {
+test("critical-risk budget parks critical work while allowing lower risks", async (t) => {
   const tasks = [
     { id: "T1", title: "Critical", role: "builder", risk: "critical", owns: ["src/critical.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
     { id: "T2", title: "Cheap", role: "builder", risk: "light", owns: ["src/light.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
@@ -453,7 +459,7 @@ test("OpenCode configuration creates local model-bound agents with effort", asyn
   assert.match(next.stdout, /AGENT airlock-browser-openai-gpt-5-6-luna-low/);
 });
 
-test("OpenCode lifecycle commands keep the host explicit and release their pin", async (t) => {
+test("OpenCode lifecycle commands keep the host explicit and release their active pin", async (t) => {
   const task = { id: "T1", title: "Loop", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
   const root = await project(t, basePlan([task]));
   await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/open": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/open", effort: "low" } } } });
@@ -576,17 +582,31 @@ test("fallback advances a clean doing task and protects every pinned candidate f
   });
   assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
   assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  const first = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout", "--json"]);
+  const missingClass = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout"]);
+  assert.equal(missingClass.status, 1);
+  assert.match(missingClass.stderr, /--class is required/);
+  const invalidClass = run(root, ["fallback", "T1", "--host", "opencode", "--class", "refusal", "--reason", "provider timeout"]);
+  assert.equal(invalidClass.status, 1);
+  assert.match(invalidClass.stderr, /--class must be one of/);
+  const first = run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout", "--json"]);
   assert.equal(first.status, 0, first.stderr);
   assert.equal(JSON.parse(first.stdout).route.model, "test/secondary");
-  const second = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "rate limited", "--json"]);
+  assert.equal(JSON.parse(first.stdout).route.failures[0].class, "timeout");
+  const second = run(root, ["fallback", "T1", "--host", "opencode", "--class", "rate-limit", "--reason", "rate limited", "--json"]);
   assert.equal(second.status, 0, second.stderr);
   const secondJson = JSON.parse(second.stdout);
   assert.equal(secondJson.route.model, "test/last");
   assert.equal(secondJson.route.failures.length, 2);
-  const exhausted = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "unavailable"]);
+  const exhausted = run(root, ["fallback", "T1", "--host", "opencode", "--class", "model-unavailable", "--reason", "unavailable"]);
   assert.equal(exhausted.status, 1);
   assert.match(exhausted.stderr, /NO FALLBACK/);
+  const statePath = path.join(root, ".git", "airlock", "router-state.json");
+  const overlongState = JSON.parse(await readFile(statePath, "utf8"));
+  Object.values(overlongState.pins)[0].candidates.push({ model: "test/fourth", effort: "low", agent: "airlock-builder-test-fourth-low" });
+  await writeFile(statePath, `${JSON.stringify(overlongState, null, 2)}\n`);
+  const limited = run(root, ["fallback", "T1", "--host", "opencode", "--class", "transport", "--reason", "network error"]);
+  assert.equal(limited.status, 1);
+  assert.match(limited.stderr, /FALLBACK LIMIT/);
 
   await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/replacement": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/replacement", effort: "low" } } } });
   const protectedPrune = run(root, ["config", "--sync", "--prune", "--host", "opencode"]);
@@ -614,7 +634,7 @@ test("fallback refuses to redispatch after a failed attempt changes the worktree
   assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
   await mkdir(path.join(root, "src"), { recursive: true });
   await writeFile(path.join(root, "src", "a.js"), "partial\n");
-  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "transport error"]);
+  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--class", "transport", "--reason", "transport error"]);
   assert.equal(fallback.status, 1);
   assert.match(fallback.stderr, /failed attempt left changes in src\/a\.js/);
   const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
@@ -633,10 +653,37 @@ test("fallback renders the requested lane when parallel tasks are doing", async 
   assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
   assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
   assert.equal(run(root, ["start", "T2", "--host", "opencode", "--parallel"]).status, 0);
-  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout"]);
+  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout"]);
   assert.equal(fallback.status, 0, fallback.stderr);
   assert.match(fallback.stdout, /TASK T1/);
   assert.doesNotMatch(fallback.stdout, /TASK T2/);
+});
+
+test("done archives the executing fallback route by task and commit", async (t) => {
+  const task = { id: "T1", title: "Archive route", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  await writeProjectRoutes(root, {
+    version: 3,
+    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
+    claude: {},
+    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
+  });
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout"]).status, 0);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "a.js"), "complete\n");
+  const done = run(root, ["done", "T1", "--host", "opencode", "--evidence", "node --test: pass", "--json"]);
+  assert.equal(done.status, 0, done.stderr);
+  const commit = JSON.parse(done.stdout).commit;
+  const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
+  assert.deepEqual(state.pins, {});
+  const [key, completed] = Object.entries(state.completed)[0];
+  assert.equal(key, `T1:${commit}:opencode`);
+  assert.equal(completed.model, "test/secondary");
+  assert.equal(completed.candidateIndex, 1);
+  assert.equal(completed.failures[0].class, "timeout");
+  assert.equal(completed.commit, commit);
 });
 
 test("version 1 router pins load as one-candidate chains and upgrade on write", async (t) => {
@@ -668,6 +715,9 @@ test("fallback configuration fails closed on old versions, duplicates, and unkno
   route.fallbacks = [{ model: "test/primary", effort: "low" }];
   await writeProjectRoutes(root, { version: 3, catalog, claude: {}, opencode: { builder: { light: route } } });
   assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /duplicate fallback candidate/);
+  route.fallbacks = ["secondary", "third", "fourth"].map((model) => ({ model: `test/${model}`, effort: "low" }));
+  await writeProjectRoutes(root, { version: 3, catalog: { opencode: {} }, claude: {}, opencode: { builder: { light: route } } });
+  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /fallbacks cannot exceed 2 candidates/);
 });
 
 test("an offered route expires before a later start and status agrees while it is live", async (t) => {
@@ -844,7 +894,8 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     const text = await readFile(path.join(root, command), "utf8");
     assert.match(text, /unattended/);
     assert.match(text, /fallback <id>/);
-    assert.match(text, /before returning any child result/);
+    assert.match(text, /before any child result/);
+    assert.match(text, /--class <class>/);
     assert.match(text, /Never fallback after any child result/);
   }
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
