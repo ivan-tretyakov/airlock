@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -13,7 +14,13 @@ const STATUSES = new Set(["todo", "doing", "blocked", "needs-you", "done"]);
 const DECISION_MODES = new Set(["assume", "block"]);
 const BLOCKING_CASES = new Set(["irreversible", "external", "access", "rework", "goal"]);
 const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const FALLBACK_CLASSES = new Set(["auth", "rate-limit", "timeout", "transport", "model-unavailable"]);
+const MAX_FALLBACK_ADVANCES = 2;
 const OFFER_PIN_TTL_MS = 5 * 60 * 1000;
+const LEGACY_OPENCODE_COMMAND_HASHES = new Set([
+  "93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e",
+  "e0073a668602070e7cb2e9a78c916a75628848bcf2a23f2c8e930b8b69f54997",
+]);
 let commandTimestamp = null;
 let clockOverride = false;
 class AirlockError extends Error {
@@ -107,6 +114,10 @@ function isNonEmptyString(value) {
 
 function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function contentHash(value) {
+  return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
 }
 
 function assertArrayOfStrings(value, label, minimum = 0) {
@@ -284,7 +295,28 @@ function parseClock(value, label, end = false) {
   return hours * 60 + minutes;
 }
 
-function validateWindow(window, label) {
+function validateCandidate(candidate, label) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new AirlockError(`${label} must be an object`);
+  if (!isNonEmptyString(candidate.model) || !isNonEmptyString(candidate.effort)) throw new AirlockError(`${label} requires model and effort`);
+  return { model: candidate.model, effort: candidate.effort };
+}
+
+function validateFallbacks(fallbacks, primary, label, version) {
+  if (fallbacks === undefined) return [];
+  if (version < 3) throw new AirlockError(`${label} fallbacks require version 3`);
+  if (!Array.isArray(fallbacks) || fallbacks.length === 0) throw new AirlockError(`${label} fallbacks must be a non-empty array`);
+  if (fallbacks.length > MAX_FALLBACK_ADVANCES) throw new AirlockError(`${label} fallbacks cannot exceed ${MAX_FALLBACK_ADVANCES} candidates`);
+  const normalized = fallbacks.map((candidate, index) => validateCandidate(candidate, `${label} fallbacks[${index}]`));
+  const seen = new Set([`${primary.model}\0${primary.effort}`]);
+  for (const candidate of normalized) {
+    const key = `${candidate.model}\0${candidate.effort}`;
+    if (seen.has(key)) throw new AirlockError(`${label} has duplicate fallback candidate: ${candidate.model} at ${candidate.effort}`);
+    seen.add(key);
+  }
+  return normalized;
+}
+
+function validateWindow(window, label, version) {
   if (!window || typeof window !== "object" || Array.isArray(window)) throw new AirlockError(`${label} must be an object`);
   if (!isNonEmptyString(window.name)) throw new AirlockError(`${label} requires name`);
   if (!Array.isArray(window.days) || window.days.length === 0 || window.days.some((day) => !["mon", "tue", "wed", "thu", "fri", "sat", "sun"].includes(day))) throw new AirlockError(`${label} days must contain valid weekdays`);
@@ -294,17 +326,18 @@ function validateWindow(window, label) {
   const startMinutes = parseClock(start, `${label} start`);
   const endMinutes = parseClock(end, `${label} end`, true);
   if (startMinutes >= endMinutes) throw new AirlockError(`${label} cannot cross midnight; use two windows such as 22:00-24:00 and 00:00-02:00`);
-  if (!isNonEmptyString(window.model) || !isNonEmptyString(window.effort)) throw new AirlockError(`${label} requires model and effort`);
-  return { ...window, startMinutes, endMinutes };
+  const primary = validateCandidate(window, label);
+  const fallbacks = validateFallbacks(window.fallbacks, primary, label, version);
+  return { ...window, ...primary, fallbacks, startMinutes, endMinutes };
 }
 
 function validateRoute(route, label, version) {
-  if (!route || typeof route !== "object" || Array.isArray(route)) throw new AirlockError(`${label} must be an object`);
-  if (!isNonEmptyString(route.model) || !isNonEmptyString(route.effort)) throw new AirlockError(`${label} requires model and effort`);
-  if (route.windows === undefined) return { model: route.model, effort: route.effort, windows: [] };
+  const primary = validateCandidate(route, label);
+  const fallbacks = validateFallbacks(route.fallbacks, primary, label, version);
+  if (route.windows === undefined) return { ...primary, fallbacks, windows: [] };
   if (version === 1) throw new AirlockError(`${label} windows require version 2`);
   if (!Array.isArray(route.windows) || route.windows.length === 0) throw new AirlockError(`${label} windows must be a non-empty array`);
-  const windows = route.windows.map((window, index) => validateWindow(window, `${label} windows[${index}]`));
+  const windows = route.windows.map((window, index) => validateWindow(window, `${label} windows[${index}]`, version));
   const names = new Set();
   for (const window of windows) {
     if (names.has(window.name)) throw new AirlockError(`${label} has duplicate window name: ${window.name}`);
@@ -317,7 +350,7 @@ function validateRoute(route, label, version) {
       }
     }
   }
-  return { model: route.model, effort: route.effort, windows };
+  return { ...primary, fallbacks, windows };
 }
 
 function routeEntries(routes, host) {
@@ -359,7 +392,7 @@ function mergeRoutes(base, override) {
 function readRoutes(configPath) {
   if (!existsSync(configPath)) return { version: 1, claude: {}, opencode: {}, catalog: {}, routeVersions: { claude: {}, opencode: {} } };
   const routes = readJson(configPath, "local model configuration");
-  if (![1, 2].includes(routes.version)) throw new AirlockError(`local model configuration at ${configPath} requires version 1 or 2`);
+  if (![1, 2, 3].includes(routes.version)) throw new AirlockError(`local model configuration at ${configPath} requires version 1, 2, or 3`);
   for (const host of ["claude", "opencode"]) {
     if (routes[host] !== undefined && (!routes[host] || typeof routes[host] !== "object" || Array.isArray(routes[host]))) throw new AirlockError(`local model configuration at ${configPath} has invalid ${host}`);
   }
@@ -403,18 +436,22 @@ function resolveConfiguredRoute(routes, task, host, timestamp = commandNow()) {
   const label = `${host}/${task.role}/${task.risk}`;
   const sourceVersion = routes.routeVersions?.[host]?.[task.role]?.[task.risk] ?? routes.version;
   const route = validateRoute(raw, label, sourceVersion);
-  for (const candidate of [route, ...route.windows]) {
-    if (host === "claude" && !CLAUDE_EFFORTS.has(candidate.effort)) throw new AirlockError(`invalid Claude effort for ${task.role}/${task.risk}: ${candidate.effort}`);
-    const declared = routes.catalog?.opencode?.[candidate.model]?.variants;
-    if (host === "opencode") {
-      if (!Array.isArray(declared) || declared.some((variant) => !isNonEmptyString(variant)) || !declared.includes(candidate.effort)) throw new AirlockError(openCodeVariantError(candidate.model, candidate.effort));
+  const bindings = [route, ...route.windows];
+  for (const binding of bindings) {
+    for (const candidate of [binding, ...binding.fallbacks]) {
+      if (host === "claude" && !CLAUDE_EFFORTS.has(candidate.effort)) throw new AirlockError(`invalid Claude effort for ${task.role}/${task.risk}: ${candidate.effort}`);
+      const declared = routes.catalog?.opencode?.[candidate.model]?.variants;
+      if (host === "opencode") {
+        if (!Array.isArray(declared) || declared.some((variant) => !isNonEmptyString(variant)) || !declared.includes(candidate.effort)) throw new AirlockError(openCodeVariantError(candidate.model, candidate.effort));
+      }
     }
   }
   const date = new Date(timestamp);
   const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
   const window = route.windows.find((item) => item.days.includes(dayName(timestamp)) && item.startMinutes <= minute && minute < item.endMinutes);
   const selected = window ?? route;
-  const resolved = { model: selected.model, effort: selected.effort, name: window?.name ?? "default", evaluatedAt: timestamp };
+  const candidates = [selected, ...selected.fallbacks].map(({ model, effort }) => ({ model, effort }));
+  const resolved = { ...candidates[0], candidates, candidateIndex: 0, name: window?.name ?? "default", evaluatedAt: timestamp };
   return resolved;
 }
 
@@ -424,25 +461,39 @@ function pinKey(root, planPath, task, host) {
 
 function readRouterState(root) {
   const statePath = routerStatePath(root);
-  if (!existsSync(statePath)) return { version: 1, pins: {} };
+  if (!existsSync(statePath)) return { version: 2, pins: {}, completed: {} };
   const state = readJson(statePath, "local router state");
-  if (state.version !== 1 || !state.pins || typeof state.pins !== "object" || Array.isArray(state.pins)) throw new AirlockError(`invalid local router state: ${statePath}`);
-  return state;
+  if (![1, 2].includes(state.version) || !state.pins || typeof state.pins !== "object" || Array.isArray(state.pins)) throw new AirlockError(`invalid local router state: ${statePath}`);
+  if (state.completed !== undefined && (!state.completed || typeof state.completed !== "object" || Array.isArray(state.completed))) throw new AirlockError(`invalid local router state completed records: ${statePath}`);
+  return {
+    version: 2,
+    pins: Object.fromEntries(Object.entries(state.pins).map(([key, pin]) => [key, normalizePin(pin)])),
+    completed: Object.fromEntries(Object.entries(state.completed ?? {}).map(([key, pin]) => [key, normalizePin(pin)])),
+  };
 }
 
 function writeRouterState(root, state) {
   const statePath = routerStatePath(root);
   mkdirSync(path.dirname(statePath), { recursive: true });
   const temporary = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify({ ...state, version: 2, completed: state.completed ?? {} }, null, 2)}\n`, "utf8");
   renameSync(temporary, statePath);
+}
+
+function normalizePin(pin) {
+  if (!pin || typeof pin !== "object" || Array.isArray(pin)) return pin;
+  const legacy = { model: pin.model, effort: pin.effort, agent: pin.agent };
+  const candidates = Array.isArray(pin.candidates) && pin.candidates.length ? pin.candidates : [legacy];
+  const candidateIndex = Number.isSafeInteger(pin.candidateIndex) && pin.candidateIndex >= 0 && pin.candidateIndex < candidates.length ? pin.candidateIndex : 0;
+  const active = candidates[candidateIndex];
+  return { ...pin, ...active, candidates, candidateIndex, agent: active.agent ?? pin.agent, failures: Array.isArray(pin.failures) ? pin.failures : [] };
 }
 
 function routeFor(task, root, host, planPath = null) {
   if (planPath) {
     const pin = readRouterState(root).pins[pinKey(root, planPath, task, host)];
     const expired = task.status !== "doing" && (!isNonEmptyString(pin?.expiresAt) || Date.parse(pin.expiresAt) <= Date.parse(commandNow()));
-    if (pin && !expired) return { ...pin, pinned: true };
+    if (pin && !expired) return { ...normalizePin(pin), pinned: true };
   }
   const recovered = task.status === "doing" && isNonEmptyString(task.startedAt);
   return { ...resolveConfiguredRoute(loadRoutes(root), task, host, recovered ? task.startedAt : commandNow()), pinned: false, recovered };
@@ -455,7 +506,8 @@ function ensureRoutePin(root, planPath, task, host) {
   const expired = task.status !== "doing" && (!isNonEmptyString(existing?.expiresAt) || Date.parse(existing.expiresAt) <= Date.parse(commandNow()));
   if (existing && !expired) return existing;
   const { pinned, ...route } = routeFor(task, root, host, planPath);
-  const pin = { ...route, agent: agentName(task.role, route), expiresAt: task.status === "doing" ? null : new Date(Date.parse(route.evaluatedAt) + OFFER_PIN_TTL_MS).toISOString() };
+  const candidates = route.candidates.map((candidate) => ({ ...candidate, agent: agentName(task.role, candidate) }));
+  const pin = { ...route, ...candidates[0], candidates, candidateIndex: 0, agent: candidates[0].agent, failures: [], expiresAt: task.status === "doing" ? null : new Date(Date.parse(route.evaluatedAt) + OFFER_PIN_TTL_MS).toISOString() };
   state.pins[key] = pin;
   writeRouterState(root, state);
   return pin;
@@ -465,6 +517,32 @@ function clearRoutePins(root, planPath, task, host = null) {
   const state = readRouterState(root);
   let changed = false;
   for (const selectedHost of host ? [host] : ["claude", "opencode"]) {
+    const key = pinKey(root, planPath, task, selectedHost);
+    if (!state.pins[key]) continue;
+    delete state.pins[key];
+    changed = true;
+  }
+  if (changed) writeRouterState(root, state);
+}
+
+function completeRoutePin(root, planPath, task, host, commit) {
+  const state = readRouterState(root);
+  const selectedKey = pinKey(root, planPath, task, host);
+  const selected = state.pins[selectedKey];
+  let changed = false;
+  if (selected) {
+    state.completed[`${task.id}:${commit}:${host}`] = {
+      ...normalizePin(selected),
+      taskId: task.id,
+      host,
+      commit,
+      worktree: normalizePath(path.resolve(root)),
+      planPath: normalizePath(path.resolve(planPath)),
+      completedAt: commandNow(),
+    };
+    changed = true;
+  }
+  for (const selectedHost of ["claude", "opencode"]) {
     const key = pinKey(root, planPath, task, selectedHost);
     if (!state.pins[key]) continue;
     delete state.pins[key];
@@ -501,15 +579,13 @@ function agentName(role, route) {
   return `airlock-${role}-${slug}`;
 }
 
-function selectedAgentPath(root, task, host, planPath) {
-  const route = routeFor(task, root, host, planPath);
+function routeAgentPath(root, role, host, route) {
   const directory = host === "opencode" ? path.join(openCodeConfigDir(), "agents") : claudeAgentsDir();
-  return path.join(directory, `${agentName(task.role, route)}.md`);
+  return path.join(directory, `${agentName(role, route)}.md`);
 }
 
-function assertSelectedAgent(root, task, host, planPath) {
-  if (host === "claude" && isNonEmptyString(process.env.CLAUDE_CODE_SUBAGENT_MODEL)) throw new AirlockError("CLAUDE_CODE_SUBAGENT_MODEL overrides Airlock routing; unset it before dispatch");
-  const agentPath = selectedAgentPath(root, task, host, planPath);
+function assertRouteAgent(root, task, host, route) {
+  const agentPath = routeAgentPath(root, task.role, host, route);
   if (host === "claude") {
     const shadow = path.join(root, ".claude", "agents", path.basename(agentPath));
     if (existsSync(shadow)) throw new AirlockError(`project agent shadows local Airlock route: ${shadow}`);
@@ -518,13 +594,31 @@ function assertSelectedAgent(root, task, host, planPath) {
   return agentPath;
 }
 
+function assertSelectedAgent(root, task, host, planPath) {
+  if (host === "claude" && isNonEmptyString(process.env.CLAUDE_CODE_SUBAGENT_MODEL)) throw new AirlockError("CLAUDE_CODE_SUBAGENT_MODEL overrides Airlock routing; unset it before dispatch");
+  const route = routeFor(task, root, host, planPath);
+  const candidates = route.candidates ?? [route];
+  for (const candidate of candidates) assertRouteAgent(root, task, host, candidate);
+  return routeAgentPath(root, task.role, host, route);
+}
+
 function routeState(route) {
   if (route.recovered) return "RECOVERED";
   return route.pinned ? "PINNED" : "PREVIEW";
 }
 
 function routeOutput(task, route) {
-  return { model: route.model, effort: route.effort, route: route.name, evaluatedAt: route.evaluatedAt, expiresAt: route.expiresAt ?? null, agent: agentName(task.role, route), state: routeState(route), pinned: Boolean(route.pinned), previewed: !route.pinned && !route.recovered, recovered: Boolean(route.recovered), clockOverride };
+  const candidates = (route.candidates ?? [{ model: route.model, effort: route.effort }]).map((candidate) => ({ ...candidate, agent: candidate.agent ?? agentName(task.role, candidate) }));
+  return { model: route.model, effort: route.effort, route: route.name, evaluatedAt: route.evaluatedAt, expiresAt: route.expiresAt ?? null, agent: route.agent ?? agentName(task.role, route), candidateIndex: route.candidateIndex ?? 0, candidates, failures: route.failures ?? [], state: routeState(route), pinned: Boolean(route.pinned), previewed: !route.pinned && !route.recovered, recovered: Boolean(route.recovered), clockOverride };
+}
+
+function dispatchLines(task, route) {
+  const candidates = routeOutput(task, route).candidates;
+  const active = route.candidateIndex ?? 0;
+  return [
+    `AGENT ${candidates[active].agent}`,
+    ...candidates.slice(active + 1).map((candidate, index) => `FALLBACK ${index + 1} ${candidate.agent} · ${candidate.model} · ${candidate.effort}`),
+  ];
 }
 
 function git(root, args, options = {}) {
@@ -617,25 +711,25 @@ function decisionSummary(decision) {
   return `${decision.id}  ${decision.question}  assumed: ${decision.assumed}   used by ${decision.consumedBy.join(", ") || "none"}`;
 }
 
-function isExpensive(task, root, host) {
+function isExpensive(task) {
   return task.risk === "critical";
 }
 
-function budgetState(plan, root, host) {
+function budgetState(plan) {
   const completed = plan.tasks.filter((task) => task.status === "done").length;
   if (completed >= plan.budget.maxTasks) return "task";
-  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task, root, host)).length;
+  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task)).length;
   return expensive >= plan.budget.maxExpensive ? "expensive" : null;
 }
 
-function selectNext(plan, root, host) {
+function selectNext(plan) {
   if (goalBlockingDecision(plan)) return null;
   const doing = plan.tasks.filter((task) => task.status === "doing");
   if (doing.length === 1) return { task: doing[0], resumed: true };
   if (plan.tasks.filter((task) => task.status === "done").length >= plan.budget.maxTasks) return null;
   const tasks = eligibleTasks(plan);
-  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task, root, host)).length;
-  const canRun = (task) => !isExpensive(task, root, host) || expensive < plan.budget.maxExpensive;
+  const expensive = plan.tasks.filter((task) => ["doing", "done"].includes(task.status) && isExpensive(task)).length;
+  const canRun = (task) => !isExpensive(task) || expensive < plan.budget.maxExpensive;
   const withoutDecisions = tasks.find((task) => openDecisionsFor(plan, task.id).length === 0 && canRun(task));
   if (withoutDecisions) return { task: withoutDecisions, resumed: false };
   const assumed = tasks.find((task) => openDecisionsFor(plan, task.id).every((decision) => (decision.mode ?? "assume") === "assume") && canRun(task));
@@ -664,19 +758,7 @@ function dependencyContext(root, plan, task) {
   return output;
 }
 
-function nextText(root, plan, host, planPath = null) {
-  const goalDecision = goalBlockingDecision(plan);
-  if (goalDecision) return { text: `NOTHING TO DO\nWaiting on ${goalDecision.id}.`, selected: null, parked: [goalDecision] };
-  const selected = selectNext(plan, root, host);
-  if (!selected) {
-    const openBlocking = plan.decisions.filter((decision) => decision.status === "open" && (decision.mode ?? "assume") === "block");
-    if (plan.tasks.every((task) => task.status === "done")) return { text: "NOTHING TO DO\nAll tasks are done.", selected: null };
-    const budget = budgetState(plan, root, host);
-    if (budget) return { text: `NOTHING TO DO\nBUDGET REACHED: ${budget === "task" ? "maxTasks" : "maxExpensive"}.`, selected: null };
-    if (openBlocking.length) return { text: `NOTHING TO DO\nWaiting on ${openBlocking.map((item) => item.id).join(", ")}.`, selected: null, parked: openBlocking };
-    return { text: "NOTHING TO DO\nAll remaining tasks are blocked.", selected: null };
-  }
-  const { task, resumed } = selected;
+function taskText(root, plan, host, planPath, task, resumed) {
   if (!task.owns?.length) throw new AirlockError(`task ${task.id} has no owns paths`);
   if (!isNonEmptyString(task.acceptance)) throw new AirlockError(`task ${task.id} has no acceptance`);
   const route = routeFor(task, root, host, planPath);
@@ -690,13 +772,28 @@ function nextText(root, plan, host, planPath = null) {
     `DONE  ${task.acceptance}`,
   ];
   if (clockOverride) lines.splice(2, 0, `CLOCK OVERRIDE · AIRLOCK_NOW=${commandTimestamp}`);
-  lines.push(`AGENT ${agentName(task.role, route)}`);
+  lines.push(...dispatchLines(task, route));
   for (const decision of openDecisionsFor(plan, task.id).filter((item) => (item.mode ?? "assume") === "assume")) {
     lines.push(`ASSUME ${decision.id}  ${decision.question} = ${decision.assumed}`);
   }
   lines.push(...dependencyContext(root, plan, task));
   lines.push("RULES Change only OWNS paths. If you need another path, stop and report it.", "      Return: changed paths + the command you ran + its result. Nothing else.");
-  return { text: lines.join("\n"), selected };
+  return lines.join("\n");
+}
+
+function nextText(root, plan, host, planPath = null) {
+  const goalDecision = goalBlockingDecision(plan);
+  if (goalDecision) return { text: `NOTHING TO DO\nWaiting on ${goalDecision.id}.`, selected: null, parked: [goalDecision] };
+  const selected = selectNext(plan);
+  if (!selected) {
+    const openBlocking = plan.decisions.filter((decision) => decision.status === "open" && (decision.mode ?? "assume") === "block");
+    if (plan.tasks.every((task) => task.status === "done")) return { text: "NOTHING TO DO\nAll tasks are done.", selected: null };
+    const budget = budgetState(plan);
+    if (budget) return { text: `NOTHING TO DO\nBUDGET REACHED: ${budget === "task" ? "maxTasks" : "maxExpensive"}.`, selected: null };
+    if (openBlocking.length) return { text: `NOTHING TO DO\nWaiting on ${openBlocking.map((item) => item.id).join(", ")}.`, selected: null, parked: openBlocking };
+    return { text: "NOTHING TO DO\nAll remaining tasks are blocked.", selected: null };
+  }
+  return { text: taskText(root, plan, host, planPath, selected.task, selected.resumed), selected };
 }
 
 function statusText(root, plan, host, planPath = null) {
@@ -710,15 +807,16 @@ function statusText(root, plan, host, planPath = null) {
   if (assumed.length) lines.push("ASSUMED (confirm at the end)", ...assumed.map((decision) => `  ${decisionSummary(decision)}`));
   if (doing.length) lines.push("DOING", ...doing.map((task) => {
     const route = routeFor(task, root, host, planPath);
-    return `  ${task.id}  ${task.title}                  ${task.role}/${route.model} · ${routeState(route)}   ${formatDuration(task.startedAt)}`;
+    const attempts = route.candidates?.length > 1 ? ` · candidate ${(route.candidateIndex ?? 0) + 1}/${route.candidates.length}` : "";
+    return `  ${task.id}  ${task.title}                  ${task.role}/${route.model} · ${routeState(route)}${attempts}   ${formatDuration(task.startedAt)}`;
   }));
   if (blocked.length) lines.push("BLOCKED", ...blocked.map((task) => `  ${task.id}  ${task.title}             ${task.note ?? "waiting on a decision"}`));
-  const next = selectNext(plan, root, host);
+  const next = selectNext(plan);
   if (next && !next.resumed) {
     const route = routeFor(next.task, root, host, planPath);
     lines.push("NEXT", `  ${next.task.id}  ${next.task.title}                  ${next.task.role}/${route.model} · ${routeState(route)}`);
   }
-  if (!next && !plan.tasks.every((task) => task.status === "done") && budgetState(plan, root, host)) lines.push("BUDGET", `  ${budgetState(plan, root, host) === "task" ? "maxTasks" : "maxExpensive"} reached`);
+  if (!next && !plan.tasks.every((task) => task.status === "done") && budgetState(plan)) lines.push("BUDGET", `  ${budgetState(plan) === "task" ? "maxTasks" : "maxExpensive"} reached`);
   return lines.join("\n");
 }
 
@@ -758,6 +856,32 @@ function auditTask(root, planPath, task, range, plan) {
     : [];
   const outOfScope = changed.filter((item) => !ownsPath(task.owns, item) && !foreign.includes(item));
   return { changed, inScope, outOfScope, foreign };
+}
+
+function advanceRouteFallback(root, planPath, plan, task, host, rawClass, rawReason) {
+  if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot fallback from ${task.status}`);
+  const failureClass = requireValue(rawClass, "--class");
+  if (!FALLBACK_CLASSES.has(failureClass)) throw new AirlockError(`--class must be one of: ${[...FALLBACK_CLASSES].join(" | ")}`);
+  const reason = requireValue(rawReason, "--reason").replace(/\s+/g, " ").trim().slice(0, 240);
+  const audit = auditTask(root, planPath, task, undefined, plan);
+  if (audit.inScope.length || audit.outOfScope.length) {
+    const changed = [...audit.inScope, ...audit.outOfScope];
+    throw new AirlockError(`refusing fallback for ${task.id}: failed attempt left changes in ${changed.join(", ")}; block or recover the task before redispatch`);
+  }
+  const state = readRouterState(root);
+  const key = pinKey(root, planPath, task, host);
+  const pin = normalizePin(state.pins[key]);
+  if (!pin) throw new AirlockError(`task ${task.id} has no pinned ${host} route`);
+  const nextIndex = pin.candidateIndex + 1;
+  if (nextIndex >= pin.candidates.length) throw new AirlockError(`NO FALLBACK for ${task.id}: route ${pin.name} exhausted ${pin.candidates.length} candidate${pin.candidates.length === 1 ? "" : "s"}`);
+  if (nextIndex > MAX_FALLBACK_ADVANCES) throw new AirlockError(`FALLBACK LIMIT for ${task.id}: at most ${MAX_FALLBACK_ADVANCES} advances are allowed`);
+  const next = pin.candidates[nextIndex];
+  assertRouteAgent(root, task, host, next);
+  const failure = { candidateIndex: pin.candidateIndex, model: pin.model, effort: pin.effort, agent: pin.agent, class: failureClass, reason, failedAt: commandNow() };
+  const updated = { ...pin, ...next, candidateIndex: nextIndex, agent: next.agent ?? agentName(task.role, next), failures: [...pin.failures, failure], expiresAt: null };
+  state.pins[key] = updated;
+  writeRouterState(root, state);
+  return updated;
 }
 
 function preservePaths(root, paths, kind, taskId = "worktree") {
@@ -827,9 +951,11 @@ function routeCandidates(routes, host) {
   const candidates = [];
   for (const { role, risk, route } of routeEntries(routes, host)) {
     resolveConfiguredRoute(routes, { role, risk }, host);
-    const all = [{ model: route.model, effort: route.effort, name: "default" }, ...route.windows];
-    for (const candidate of all) {
-      candidates.push({ role, route: { model: candidate.model, effort: candidate.effort, name: candidate.name, evaluatedAt: commandNow() } });
+    const bindings = [{ model: route.model, effort: route.effort, fallbacks: route.fallbacks, name: "default" }, ...route.windows];
+    for (const binding of bindings) {
+      for (const candidate of [binding, ...binding.fallbacks]) {
+        candidates.push({ role, route: { model: candidate.model, effort: candidate.effort, name: binding.name, evaluatedAt: commandNow() } });
+      }
     }
   }
   return candidates;
@@ -886,7 +1012,10 @@ async function syncHostAgents(root, routes, host, prune = false) {
   const stale = existsSync(directory)
     ? (await readdir(directory)).filter((name) => name.startsWith("airlock-") && name.endsWith(".md") && !wanted.has(name.slice(0, -3))).map((name) => path.join(directory, name))
     : [];
-  const protectedAgents = new Set(Object.entries(readRouterState(root).pins).filter(([key]) => key.startsWith(`${host}:`)).map(([, pin]) => pin.agent).filter(isNonEmptyString));
+  const protectedAgents = new Set(Object.entries(readRouterState(root).pins)
+    .filter(([key]) => key.startsWith(`${host}:`))
+    .flatMap(([, pin]) => (pin.candidates ?? [pin]).map((candidate) => candidate.agent))
+    .filter(isNonEmptyString));
   const pruned = [];
   if (prune) {
     for (const agentPath of stale.filter((item) => !protectedAgents.has(path.basename(item, ".md")))) {
@@ -904,10 +1033,19 @@ async function bootstrapOpenCode(root) {
   const created = [];
   const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const commandPath = path.join(root, ".opencode", "command", "airlock.md");
+  const source = readFileSync(path.join(sourceRoot, ".opencode", "command", "airlock.md"), "utf8");
   if (!existsSync(commandPath)) {
     await mkdir(path.dirname(commandPath), { recursive: true });
-    await writeFile(commandPath, readFileSync(path.join(sourceRoot, ".opencode", "command", "airlock.md"), "utf8"), "utf8");
+    await writeFile(commandPath, source, "utf8");
     created.push(commandPath);
+  } else {
+    const current = readFileSync(commandPath, "utf8");
+    if (LEGACY_OPENCODE_COMMAND_HASHES.has(contentHash(current))) {
+      await writeFile(commandPath, source, "utf8");
+      created.push(commandPath);
+    } else if (!current.includes("--class <class>")) {
+      throw new AirlockError(`custom OpenCode Airlock command lacks classified fallback support: ${commandPath}; merge the current packaged command manually`);
+    }
   }
   return created;
 }
@@ -972,8 +1110,10 @@ async function configureRoute(root, flags) {
   const configPath = flags.project ? projectConfigPath(root) : userConfigPath();
   const routes = readRoutes(configPath);
   routes[host][role] ??= {};
-  const windows = routes.version === 2 ? routes[host][role][risk]?.windows : undefined;
-  routes[host][role][risk] = { model, effort, ...(windows ? { windows } : {}) };
+  const existing = routes[host][role][risk];
+  const windows = routes.version >= 2 ? existing?.windows : undefined;
+  const fallbacks = routes.version >= 3 ? existing?.fallbacks : undefined;
+  routes[host][role][risk] = { model, effort, ...(fallbacks ? { fallbacks } : {}), ...(windows ? { windows } : {}) };
   routes.routeVersions[host][role] ??= {};
   routes.routeVersions[host][role][risk] = routes.version;
   const effective = effectiveRoutesAfterUpdate(root, configPath, routes);
@@ -1010,7 +1150,7 @@ function importLedger(root, planPath, ledgerPath) {
 }
 
 function help() {
-  return "Usage: airlock <init|config|next|start|done|block|ask|answer|status|audit|render|import> [arguments] [--plan path] [--host claude|opencode] [--json]";
+  return "Usage: airlock <init|config|next|start|fallback|done|block|ask|answer|status|audit|render|import> [arguments] [--plan path] [--host claude|opencode] [--json]";
 }
 
 function configText(result) {
@@ -1060,7 +1200,7 @@ async function main(argv = process.argv.slice(2)) {
   const plan = readPlan(planPath);
   if (command === "next") {
     if (positional.length) throw new AirlockError(`next accepts no positional arguments: ${positional.join(" ")}`);
-    const selected = selectNext(plan, root, host);
+    const selected = selectNext(plan);
     clearInactiveRoutePins(root, planPath, plan, host, selected?.task ?? null);
     if (selected) {
       assertSelectedAgent(root, selected.task, host, planPath);
@@ -1080,7 +1220,7 @@ async function main(argv = process.argv.slice(2)) {
       ensureRoutePin(root, planPath, task, host);
       activateRoutePin(root, planPath, task, host);
       const route = routeFor(task, root, host, planPath);
-      return output({ text: `STARTED ${task.id} (resume)\nROUTE ${routeState(route)} · ${route.name} · evaluated ${route.evaluatedAt}\nAGENT ${agentName(task.role, route)}`, task, route: routeOutput(task, route) }, flags.json);
+      return output({ text: [`STARTED ${task.id} (resume)`, `ROUTE ${routeState(route)} · ${route.name} · evaluated ${route.evaluatedAt}`, ...dispatchLines(task, route)].join("\n"), task, route: routeOutput(task, route) }, flags.json);
     }
     if (task.status !== "todo") throw new AirlockError(`task ${task.id} cannot start from ${task.status}`);
     if (!dependenciesDone(plan, task)) throw new AirlockError(`task ${task.id} has unfinished dependencies`);
@@ -1098,7 +1238,16 @@ async function main(argv = process.argv.slice(2)) {
     writePlan(planPath, plan);
     activateRoutePin(root, planPath, task, host);
     const route = routeFor(task, root, host, planPath);
-    return output({ text: `STARTED ${task.id}\nROUTE ${routeState(route)} · ${route.name} · evaluated ${route.evaluatedAt}\nAGENT ${agentName(task.role, route)}`, task, route: routeOutput(task, route) }, flags.json);
+    return output({ text: [`STARTED ${task.id}`, `ROUTE ${routeState(route)} · ${route.name} · evaluated ${route.evaluatedAt}`, ...dispatchLines(task, route)].join("\n"), task, route: routeOutput(task, route) }, flags.json);
+  }
+  if (command === "fallback") {
+    if (positional.length !== 1) throw new AirlockError("fallback requires exactly one task id");
+    const task = taskById(plan, requireValue(positional[0], "task id"));
+    if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot fallback from ${task.status}`);
+    ensureRoutePin(root, planPath, task, host);
+    const route = advanceRouteFallback(root, planPath, plan, task, host, flags.class, flags.reason);
+    const text = [`FALLBACK ${task.id} · candidate ${route.candidateIndex + 1}/${route.candidates.length}`, taskText(root, plan, host, planPath, task, true)].join("\n");
+    return output({ text, task, route: routeOutput(task, { ...route, pinned: true }) }, flags.json);
   }
   if (command === "audit") {
     const task = taskById(plan, requireValue(positional[0], "task id"));
@@ -1134,7 +1283,7 @@ async function main(argv = process.argv.slice(2)) {
       git(root, ["reset", "--", relativePlan(root, planPath)]);
       throw error;
     }
-    clearRoutePins(root, planPath, task);
+    completeRoutePin(root, planPath, task, host, commit);
     return output({ text: `DONE ${task.id} ${commit}`, task, commit }, flags.json);
   }
   if (command === "block") {
@@ -1202,7 +1351,7 @@ async function main(argv = process.argv.slice(2)) {
   throw new AirlockError(`unknown command: ${command}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     if (process.argv.includes("--json")) process.stdout.write(`${JSON.stringify({ error: message }, null, 2)}\n`);
