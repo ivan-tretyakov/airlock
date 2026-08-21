@@ -18,13 +18,15 @@ Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The com
 
 Each task requires an id, role (`builder`, `checker`, or `browser`), risk, at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance.
 
-Models and effort resolve from local role/risk routing. They are never stored in the plan or repository. Configure the routing before dispatching work:
+Models and effort resolve from local role/risk routing. They are never stored in the plan or repository. A route can be static or use non-overlapping UTC windows; Airlock resolves and pins the exact route before dispatch. Claude and OpenCode mappings are independent. Configure the routing before dispatching work:
 
 ```text
-airlock config --host opencode --role browser --risk light --model openai/gpt-5.6-luna --effort low
+airlock config --host claude --role browser --risk light --model sonnet --effort low
 ```
 
-The command writes user-local configuration by default. Add `--project` to write an override under the repository's Git common directory (`.git/airlock/models.json`), which is never a tracked worktree file. Project routes override user routes. A missing route fails with the exact host/role/risk combination; there are no bundled provider defaults.
+The command writes user-local configuration by default. Add `--project` to write an override under the repository's Git common directory (`.git/airlock/models.json`), which is never a tracked worktree file. Project routes override user routes. A missing or ambiguous route fails with the exact host/role/risk combination; there are no bundled provider defaults. Run `airlock config --sync --host claude|opencode` after editing local routes to create the required agents. OpenCode mappings, including version 1 static mappings, declare each model's legal variants under `catalog.opencode`; an unknown provider-specific effort fails closed instead of silently using a default. Discover a model's legal names with `opencode models <provider> --verbose`.
+
+`next` pins an offered route for five minutes so the normal `next` to `start` loop is stable without holding a stale time-window route indefinitely. `status` shows the live offered pin; after expiry, both commands preview or select the current route. A doing task remains pinned until `done` or `block`. When `AIRLOCK_NOW` is used for deterministic testing, route output includes an explicit `CLOCK OVERRIDE` marker.
 
 ## Commands
 
@@ -46,14 +48,14 @@ At `NOTHING TO DO`, `/airlock` presents all open blocking decisions and assumpti
 
 ## Hosts
 
-Claude Code uses the three portable files in `roles/` and supplies the resolved model with each `Agent` dispatch.
+Claude Code uses the three portable files in `roles/` as the source for generated local agents.
 
-Claude Code receives the locally resolved model at dispatch. OpenCode's `task` API selects models from static agent configuration, so `airlock config --host opencode ...` generates the required role/model/effort agent in the user's OpenCode agent directory and `next --host opencode` emits its exact `AGENT` name. Restart OpenCode after changing local routes.
+Both hosts use generated agents to make model and effort deterministic. `next` emits the exact `AGENT` to dispatch; host shims do not choose a model. OpenCode agents are generated under `~/.config/opencode/agents/`; restart OpenCode after syncing routes.
 
 The Claude shim invokes its bundled CLI through `${CLAUDE_PLUGIN_ROOT}`. Install the OpenCode CLI globally from the release tag:
 
 ```text
-npm install --global github:ivan-tretyakov/airlock#v3.0.1
+npm install --global github:ivan-tretyakov/airlock#v3.1.0
 ```
 
 For local development, run `npm link` in this checkout.
@@ -64,7 +66,7 @@ Bootstrap an OpenCode project without merging its existing configuration:
 airlock init "Add an export command" --done "npm test passes" --host opencode
 ```
 
-This adds the model-neutral `/airlock` command under `.opencode/`. Configure OpenCode routes with `airlock config`; it writes generated model-bound agents only to the user's OpenCode configuration. Re-run the same command after a global upgrade to add a missing project command; existing plan and command files are not overwritten.
+This adds the model-neutral `/airlock` command under `.opencode/`. Configure OpenCode routes with `airlock config` and generate candidates with `airlock config --sync --host opencode`; agents are user-local. Re-run the same command after a global upgrade to add a missing project command; existing plan and command files are not overwritten.
 
 The host surface is one command each: `commands/airlock.md` and `.opencode/command/airlock.md`. There are no hooks, guard plugins, external launchers, ledgers, or lifecycle templates.
 
@@ -81,6 +83,25 @@ The automated tests cover schema invariants, lifecycle transitions, assumption r
 `--unattended` forwards to `next`; a blocking decision returns `PARKED` and ends the run without prompting. `maxExpensive` caps tasks using the host's critical model. Parallel writers require `--parallel` and disjoint ownership; overlapping or ambiguous glob prefixes remain serialized.
 
 ## Migration
+
+### Upgrading from 3.0.x
+
+Airlock 3.1 requires every OpenCode model used by a route to declare its legal variants in the local `models.json`. Existing 3.0.x files have no catalog and therefore fail closed after upgrade. Run `opencode models <provider> --verbose`, then add the reported names without changing the existing routes:
+
+```json
+{
+  "version": 1,
+  "catalog": {
+    "opencode": {
+      "provider/model": { "variants": ["low", "high"] }
+    }
+  }
+}
+```
+
+Preserve the file's existing `claude` and `opencode` sections when adding `catalog`, then run `airlock config --sync --host opencode` and restart OpenCode.
+
+### Importing from 2.x
 
 `airlock import <ledger.md>` performs a conservative one-time conversion of a 2.x ledger. It exits non-zero rather than guessing when it cannot map a Crossing's ownership or acceptance criterion. Historical 2.x specifications and reviews live in `docs/airlock/archive/2026-08/`.
 
