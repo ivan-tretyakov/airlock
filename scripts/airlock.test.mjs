@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -131,6 +131,17 @@ test("init refuses an empty done criterion", async (t) => {
   assert.match(result.stderr, /done criterion/);
 });
 
+test("CLI entry point runs through a linked package directory", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "airlock-link-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const linked = path.join(root, "airlock");
+  await symlink(packageRoot, linked, process.platform === "win32" ? "junction" : "dir");
+  const result = spawnSync(process.execPath, [path.join(linked, "scripts", "airlock.mjs"), "help"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: airlock/);
+});
+
 test("init state does not poison the first task boundary", async (t) => {
   const root = await bareProject(t);
   await writeFile(path.join(root, "baseline.txt"), "baseline\n");
@@ -153,6 +164,25 @@ test("OpenCode bootstrap installs a model-neutral command without replacing the 
   assert.equal(await readFile(path.join(root, "airlock.plan.json"), "utf8"), before);
   assert.match(await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8"), /airlock next --host opencode/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
+});
+
+test("OpenCode bootstrap upgrades only the exact legacy command shim", async (t) => {
+  const task = { id: "T1", title: "Bootstrap", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  const commandDir = path.join(root, ".opencode", "command");
+  const commandPath = path.join(commandDir, "airlock.md");
+  await mkdir(commandDir, { recursive: true });
+  const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-command-3.1.0.md");
+  await writeFile(commandPath, await readFile(fixture, "utf8"));
+  const upgraded = run(root, ["init", "--host", "opencode"]);
+  assert.equal(upgraded.status, 0, upgraded.stderr);
+  assert.match(await readFile(commandPath, "utf8"), /airlock fallback <id>/);
+
+  await writeFile(commandPath, "custom stale command\n");
+  const custom = run(root, ["init", "--host", "opencode"]);
+  assert.equal(custom.status, 1);
+  assert.match(custom.stderr, /custom OpenCode Airlock command lacks fallback support/);
+  assert.equal(await readFile(commandPath, "utf8"), "custom stale command\n");
 });
 
 test("next, start, audit, and done create an audited task commit", async (t) => {
@@ -499,6 +529,147 @@ test("version 2 OpenCode routes select UTC windows and pin the dispatched agent"
   assert.match(releasedPrune.stdout, /PRUNED[\s\S]*airlock-browser-test-peak-high\.md/);
 });
 
+test("version 3 routes pin the complete fallback chain selected by the UTC window", async (t) => {
+  const tasks = ["T1", "T2"].map((id) => ({ id, title: id, role: "builder", risk: "standard", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null }));
+  const root = await project(t, basePlan(tasks));
+  const models = ["test/offpeak", "test/peak", "test/secondary", "test/last"];
+  await writeProjectRoutes(root, {
+    version: 3,
+    catalog: { opencode: Object.fromEntries(models.map((model) => [model, { variants: ["low"] }])) },
+    claude: {},
+    opencode: { builder: { standard: {
+      model: "test/offpeak",
+      effort: "low",
+      fallbacks: [{ model: "test/secondary", effort: "low" }, { model: "test/last", effort: "low" }],
+      windows: [{ name: "weekday-peak", days: ["mon", "tue", "wed", "thu", "fri"], utc: "06:00-10:00", model: "test/peak", effort: "low", fallbacks: [{ model: "test/offpeak", effort: "low" }, { model: "test/last", effort: "low" }] }],
+    } } },
+  });
+  const peak = { AIRLOCK_NOW: "2026-08-24T07:00:00.000Z" };
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], peak).status, 0);
+  await rm(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", "airlock-builder-test-last-low.md"));
+  const missingFallback = run(root, ["next", "--host", "opencode"], peak);
+  assert.equal(missingFallback.status, 1);
+  assert.match(missingFallback.stderr, /missing generated opencode agent.*test-last-low/);
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], peak).status, 0);
+  const nextPeak = run(root, ["next", "--host", "opencode", "--json"], peak);
+  assert.equal(nextPeak.status, 0, nextPeak.stderr);
+  const peakJson = JSON.parse(nextPeak.stdout);
+  assert.deepEqual(peakJson.route.candidates.map(({ model }) => model), ["test/peak", "test/offpeak", "test/last"]);
+  assert.match(peakJson.text, /FALLBACK 1 airlock-builder-test-offpeak-low/);
+  assert.equal(run(root, ["block", "T1", "--host", "opencode", "--reason", "skip"], peak).status, 0);
+
+  const offpeak = { AIRLOCK_NOW: "2026-08-24T11:00:00.000Z" };
+  const nextOffpeak = run(root, ["next", "--host", "opencode", "--json"], offpeak);
+  assert.equal(nextOffpeak.status, 0, nextOffpeak.stderr);
+  assert.deepEqual(JSON.parse(nextOffpeak.stdout).route.candidates.map(({ model }) => model), ["test/offpeak", "test/secondary", "test/last"]);
+});
+
+test("fallback advances a clean doing task and protects every pinned candidate from pruning", async (t) => {
+  const task = { id: "T1", title: "Fallback", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  const models = ["test/primary", "test/secondary", "test/last", "test/replacement"];
+  await writeProjectRoutes(root, {
+    version: 3,
+    catalog: { opencode: Object.fromEntries(models.map((model) => [model, { variants: ["low"] }])) },
+    claude: {},
+    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }, { model: "test/last", effort: "low" }] } } },
+  });
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
+  const first = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout", "--json"]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(JSON.parse(first.stdout).route.model, "test/secondary");
+  const second = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "rate limited", "--json"]);
+  assert.equal(second.status, 0, second.stderr);
+  const secondJson = JSON.parse(second.stdout);
+  assert.equal(secondJson.route.model, "test/last");
+  assert.equal(secondJson.route.failures.length, 2);
+  const exhausted = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "unavailable"]);
+  assert.equal(exhausted.status, 1);
+  assert.match(exhausted.stderr, /NO FALLBACK/);
+
+  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/replacement": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/replacement", effort: "low" } } } });
+  const protectedPrune = run(root, ["config", "--sync", "--prune", "--host", "opencode"]);
+  assert.equal(protectedPrune.status, 0, protectedPrune.stderr);
+  for (const model of ["primary", "secondary", "last"]) {
+    assert.equal(await readFile(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", `airlock-builder-test-${model}-low.md`), "utf8").then(() => true, () => false), true);
+  }
+  assert.equal(run(root, ["block", "T1", "--host", "opencode", "--reason", "stop"]).status, 0);
+  assert.equal(run(root, ["config", "--sync", "--prune", "--host", "opencode"]).status, 0);
+  for (const model of ["primary", "secondary", "last"]) {
+    assert.equal(await readFile(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", `airlock-builder-test-${model}-low.md`), "utf8").then(() => true, () => false), false);
+  }
+});
+
+test("fallback refuses to redispatch after a failed attempt changes the worktree", async (t) => {
+  const task = { id: "T1", title: "Dirty fallback", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  await writeProjectRoutes(root, {
+    version: 3,
+    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
+    claude: {},
+    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
+  });
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "a.js"), "partial\n");
+  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "transport error"]);
+  assert.equal(fallback.status, 1);
+  assert.match(fallback.stderr, /failed attempt left changes in src\/a\.js/);
+  const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
+  assert.equal(Object.values(state.pins)[0].candidateIndex, 0);
+});
+
+test("fallback renders the requested lane when parallel tasks are doing", async (t) => {
+  const tasks = ["T1", "T2"].map((id) => ({ id, title: id, role: "builder", risk: "light", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null }));
+  const root = await project(t, basePlan(tasks));
+  await writeProjectRoutes(root, {
+    version: 3,
+    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
+    claude: {},
+    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
+  });
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["start", "T2", "--host", "opencode", "--parallel"]).status, 0);
+  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout"]);
+  assert.equal(fallback.status, 0, fallback.stderr);
+  assert.match(fallback.stdout, /TASK T1/);
+  assert.doesNotMatch(fallback.stdout, /TASK T2/);
+});
+
+test("version 1 router pins load as one-candidate chains and upgrade on write", async (t) => {
+  const task = { id: "T1", title: "Legacy pin", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
+  const root = await project(t, basePlan([task]));
+  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/legacy": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/legacy", effort: "low" } } } });
+  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
+  assert.equal(run(root, ["next", "--host", "opencode"]).status, 0);
+  const statePath = path.join(root, ".git", "airlock", "router-state.json");
+  const current = JSON.parse(await readFile(statePath, "utf8"));
+  const [key, pin] = Object.entries(current.pins)[0];
+  const legacy = { version: 1, pins: { [key]: { model: pin.model, effort: pin.effort, agent: pin.agent, name: pin.name, evaluatedAt: pin.evaluatedAt, expiresAt: pin.expiresAt } } };
+  await writeFile(statePath, `${JSON.stringify(legacy, null, 2)}\n`);
+
+  const start = run(root, ["start", "T1", "--host", "opencode", "--json"]);
+  assert.equal(start.status, 0, start.stderr);
+  assert.equal(JSON.parse(start.stdout).route.candidates.length, 1);
+  assert.equal(JSON.parse(await readFile(statePath, "utf8")).version, 2);
+});
+
+test("fallback configuration fails closed on old versions, duplicates, and unknown variants", async (t) => {
+  const root = await project(t);
+  const route = { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] };
+  const catalog = { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["high"] } } };
+  await writeProjectRoutes(root, { version: 2, catalog, claude: {}, opencode: { builder: { light: route } } });
+  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /fallbacks require version 3/);
+  await writeProjectRoutes(root, { version: 3, catalog, claude: {}, opencode: { builder: { light: route } } });
+  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /does not declare variant low/);
+  route.fallbacks = [{ model: "test/primary", effort: "low" }];
+  await writeProjectRoutes(root, { version: 3, catalog, claude: {}, opencode: { builder: { light: route } } });
+  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /duplicate fallback candidate/);
+});
+
 test("an offered route expires before a later start and status agrees while it is live", async (t) => {
   const task = { id: "T1", title: "Expire", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
   const root = await project(t, basePlan([task]));
@@ -552,6 +723,14 @@ test("version 2 config updates defaults without dropping windows or writing an i
   const invalid = run(root, ["config", "--project", "--host", "opencode", "--role", "browser", "--risk", "light", "--model", "test/missing", "--effort", "high"]);
   assert.equal(invalid.status, 1);
   assert.equal(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"), before);
+
+  const version3 = { version: 3, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "low", fallbacks: [{ model: "opus", effort: "high" }], windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "opus", effort: "high", fallbacks: [{ model: "sonnet", effort: "low" }] }] } } }, opencode: {} };
+  await writeProjectRoutes(root, version3);
+  const changedV3 = run(root, ["config", "--project", "--host", "claude", "--role", "builder", "--risk", "light", "--model", "haiku", "--effort", "medium"]);
+  assert.equal(changedV3.status, 0, changedV3.stderr);
+  const storedV3 = JSON.parse(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"));
+  assert.deepEqual(storedV3.claude.builder.light.fallbacks, version3.claude.builder.light.fallbacks);
+  assert.deepEqual(storedV3.claude.builder.light.windows, version3.claude.builder.light.windows);
 });
 
 test("merged version 1 OpenCode routes remain compatible beside version 2 Claude routes", async (t) => {
@@ -664,6 +843,9 @@ test("prompt surface contains only the slim roles and two shims", async () => {
   for (const command of ["commands/airlock.md", ".opencode/command/airlock.md"]) {
     const text = await readFile(path.join(root, command), "utf8");
     assert.match(text, /unattended/);
+    assert.match(text, /fallback <id>/);
+    assert.match(text, /before returning any child result/);
+    assert.match(text, /Never fallback after any child result/);
   }
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
