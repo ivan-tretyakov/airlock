@@ -18,6 +18,10 @@ Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The com
 
 Each task requires an id, role (`builder`, `checker`, or `browser`), risk, at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance.
 
+### Authoring tasks
+
+Verification is proportional to risk. Default to `standard` when authoring a task; use `complex` only for cross-cutting or architectural work, and reserve `critical` for irreversible, security-sensitive, or migration work — `budget.maxExpensive` caps it deliberately. Builder-run acceptance is sufficient for `light` and `standard` tasks whose acceptance one command captures: the builder runs it and `done --evidence` records the result. When acceptance cannot be captured in one command, prefer one consolidated checker near the end of the plan that `dependsOn` every builder task it verifies; Airlock supplies the checker with each dependency's scoped diff and evidence. Reserve per-task checkers for `complex` and `critical` tasks. A request that is one task with one obvious verification command does not need a plan at all; use Airlock when delivery spans multiple tasks with distinct ownership.
+
 Models and effort resolve from local role/risk routing. They are never stored in the plan or repository. A route can be static, use non-overlapping UTC windows, and carry an ordered fallback chain. Airlock resolves and pins the complete route before dispatch. Claude and OpenCode mappings are independent. Configure the routing before dispatching work:
 
 ```text
