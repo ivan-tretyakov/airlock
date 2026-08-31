@@ -105,6 +105,10 @@ This adds the model-neutral `/airlock` command under `.opencode/`. Configure Ope
 
 The host surface is one command each: `commands/airlock.md` and `.opencode/command/airlock.md`. There are no hooks, guard plugins, external launchers, ledgers, or lifecycle templates.
 
+## Extensions
+
+Extensions are optional adapters that use the Airlock CLI without changing hosts, routing, or the prompt surface. Airlock never probes for an extension's runtime; each extension fails closed when its runtime is absent. One extension is specified: a [Herdr](https://herdr.dev/) adapter that dispatches the existing `opencode` host's tasks into persistent Herdr panes, with Airlock retaining all plan, route, audit, and commit authority. See `docs/airlock/specs/2026-08-31-airlock-herdr-adapter.md`; it is not yet implemented and is excluded from the npm package.
+
 ## Validation
 
 ```text
