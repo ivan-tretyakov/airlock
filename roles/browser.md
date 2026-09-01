@@ -1,5 +1,5 @@
 ---
-name: browser
+name: airlock-browser
 description: Read-only browser verifier for one Airlock task.
 tools: Read, Glob, Grep, ToolSearch, mcp__*__*
 ---

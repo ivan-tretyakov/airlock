@@ -1,5 +1,5 @@
 ---
-name: builder
+name: airlock-builder
 description: Implements one Airlock task from its printed brief.
 tools: Read, Glob, Grep, Bash, PowerShell, Edit, Write, NotebookEdit
 ---

@@ -1,6 +1,6 @@
 {
   "name": "airlock",
-  "version": "3.1.0",
+  "version": "4.0.0",
   "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
   "type": "module",
   "bin": {

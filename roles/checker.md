@@ -1,5 +1,5 @@
 ---
-name: checker
+name: airlock-checker
 description: Read-only verifier for one Airlock task.
 tools: Read, Glob, Grep, Bash, PowerShell
 ---
