@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { ownsPath, validatePlan } from "./airlock.mjs";
+import { ownsPath, upgradePlan, validatePlan } from "./airlock.mjs";
 
 const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "airlock.mjs");
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PACKAGED_31_SHIM_HASH = "9201872f0c11c80d2a76b90bd14afc911943f7cf2923bd4212798a07eaba6e8e";
 
-function basePlan(tasks = []) {
+function task(id, overrides = {}) {
+  return { id, title: id, role: "builder", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null, ...overrides };
+}
+
+function basePlan(tasks = [], schema = "airlock.plan/v4") {
   return {
-    schema: "airlock.plan/v3",
+    schema,
     goal: "Airlock plan behavior is testable",
     done: ["node --test scripts/airlock.test.mjs passes"],
     nonGoals: [],
@@ -20,6 +27,10 @@ function basePlan(tasks = []) {
     tasks,
     decisions: [],
   };
+}
+
+function v3Plan(tasks = []) {
+  return basePlan(tasks, "airlock.plan/v3");
 }
 
 async function bareProject(t) {
@@ -31,64 +42,29 @@ async function bareProject(t) {
   return root;
 }
 
-function testEnv(root) {
-  return {
-    AIRLOCK_CONFIG_DIR: path.join(root, ".git", "airlock-test", "config"),
-    AIRLOCK_CLAUDE_AGENT_DIR: path.join(root, ".git", "airlock-test", "claude-agents"),
-    OPENCODE_CONFIG_DIR: path.join(root, ".git", "airlock-test", "opencode"),
-  };
-}
-
-function testAgentName(role, route) {
-  const slug = `${route.model}-${route.effort}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-  return `airlock-${role}-${slug}.md`;
-}
-
-async function installTestRoutes(root, tasks = []) {
-  const routes = { version: 1, catalog: { opencode: {} }, claude: {}, opencode: {} };
-  for (const host of ["claude", "opencode"]) {
-    for (const task of tasks) {
-      routes[host][task.role] ??= {};
-      const route = routes[host][task.role][task.risk] ?? { model: `test/${host}-${task.role}-${task.risk}`, effort: "medium" };
-      routes[host][task.role][task.risk] = route;
-      if (host === "opencode") routes.catalog.opencode[route.model] = { variants: ["medium"] };
-    }
-  }
-  await mkdir(path.join(root, ".git", "airlock"), { recursive: true });
-  await writeFile(path.join(root, ".git", "airlock", "models.json"), `${JSON.stringify(routes, null, 2)}\n`);
-  const env = testEnv(root);
-  await mkdir(env.AIRLOCK_CLAUDE_AGENT_DIR, { recursive: true });
-  await mkdir(path.join(env.OPENCODE_CONFIG_DIR, "agents"), { recursive: true });
-  for (const host of ["claude", "opencode"]) {
-    for (const [role, risks] of Object.entries(routes[host])) {
-      for (const route of Object.values(risks)) {
-        const directory = host === "claude" ? env.AIRLOCK_CLAUDE_AGENT_DIR : path.join(env.OPENCODE_CONFIG_DIR, "agents");
-        await writeFile(path.join(directory, testAgentName(role, route)), "generated test agent\n");
-      }
-    }
-  }
-}
-
 async function project(t, plan = basePlan()) {
   const root = await bareProject(t);
   await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
   await writeFile(path.join(root, "baseline.txt"), "baseline\n");
   execFileSync("git", ["-C", root, "add", "."]);
   execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
-  await installTestRoutes(root, plan.tasks);
   return root;
 }
 
 function run(root, args, env = {}) {
-  return spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...testEnv(root), ...env } });
+  return spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
 }
 
-async function readPlan(root) {
+async function readPlanFile(root) {
   return JSON.parse(await readFile(path.join(root, "airlock.plan.json"), "utf8"));
 }
 
-async function writeProjectRoutes(root, routes) {
-  await writeFile(path.join(root, ".git", "airlock", "models.json"), `${JSON.stringify(routes, null, 2)}\n`);
+async function writePlanFile(root, plan) {
+  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+}
+
+function contentHash(value) {
+  return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
 }
 
 test("owns supports exact paths, directories, and globs", () => {
@@ -104,24 +80,123 @@ test("owns folds case on case-insensitive hosts", { skip: !["win32", "darwin"].i
 });
 
 test("schema rejects cycles, missing evidence, and blocking doing tasks", () => {
-  const task = (id, dependsOn = []) => ({
-    id,
-    title: id,
-    role: "builder",
-    risk: "standard",
-    owns: [`src/${id}.js`],
-    dependsOn,
-    acceptance: "test passes",
-    status: "todo",
-    evidence: [],
-    startedAt: null,
-    finishedAt: null,
-    note: null,
-  });
-  assert.throws(() => validatePlan(basePlan([task("T1", ["T2"]), task("T2", ["T1"])])), /cycle/);
-  const done = task("T1");
-  done.status = "done";
-  assert.throws(() => validatePlan(basePlan([done])), /requires evidence/);
+  assert.throws(() => validatePlan(basePlan([task("T1", { dependsOn: ["T2"] }), task("T2", { dependsOn: ["T1"] })])), /cycle/);
+  assert.throws(() => validatePlan(basePlan([task("T1", { status: "done" })])), /requires evidence/);
+});
+
+test("v4 schema governs expensive, residual risk, and task model", () => {
+  assert.doesNotThrow(() => validatePlan(basePlan([task("T1", { expensive: true })])));
+  assert.doesNotThrow(() => validatePlan(basePlan([task("T1", { expensive: false })])));
+  assert.throws(() => validatePlan(basePlan([task("T1", { expensive: "yes" })])), /task T1 expensive must be a boolean/);
+  assert.throws(() => validatePlan(basePlan([task("T1", { risk: "critical" })])), /task T1 risk was removed in v4; use expensive: true for critical-cost tasks/);
+  assert.throws(() => validatePlan(basePlan([task("T1", { model: "sonnet" })])), /task T1 model is not supported; model choice belongs to the host agent files/);
+});
+
+test("upgradePlan maps every v3 risk level and rejects a premature expensive field", () => {
+  const plan = v3Plan([
+    task("T1", { risk: "light" }),
+    task("T2", { risk: "standard" }),
+    task("T3", { risk: "complex" }),
+    task("T4", { risk: "critical" }),
+  ]);
+  const { plan: upgraded, upgraded: didUpgrade, mapped } = upgradePlan(plan);
+  assert.equal(didUpgrade, true);
+  assert.equal(upgraded.schema, "airlock.plan/v4");
+  assert.deepEqual(mapped, ["T4"]);
+  for (const item of upgraded.tasks) assert.equal("risk" in item, false);
+  for (const id of ["T1", "T2", "T3"]) assert.equal("expensive" in upgraded.tasks.find((item) => item.id === id), false);
+  assert.equal(upgraded.tasks.find((item) => item.id === "T4").expensive, true);
+  assert.doesNotThrow(() => validatePlan(upgraded));
+
+  assert.throws(() => upgradePlan(v3Plan([task("T1", { risk: "standard", expensive: true })])), /task T1 has both risk and expensive; a v3 plan must not carry expensive/);
+
+  const v4 = basePlan([task("T1")]);
+  const passthrough = upgradePlan(v4);
+  assert.equal(passthrough.upgraded, false);
+  assert.equal(passthrough.plan, v4);
+});
+
+test("v2 and unknown plan schemas fail closed", async (t) => {
+  const root = await project(t, basePlan([task("T1")], "airlock.plan/v2"));
+  const v2 = run(root, ["next"]);
+  assert.equal(v2.status, 1);
+  assert.match(v2.stderr, /plan schema must be airlock\.plan\/v4/);
+  await writePlanFile(root, basePlan([task("T1")], "airlock.plan/v9"));
+  const unknown = run(root, ["next"]);
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /plan schema must be airlock\.plan\/v4/);
+});
+
+test("UPGRADED notice goes to stderr, keeps stdout intact, and read-only commands never persist", async (t) => {
+  const root = await project(t, v3Plan([task("T1", { risk: "standard" })]));
+  for (const attempt of [1, 2]) {
+    const next = run(root, ["next"]);
+    assert.equal(next.status, 0, next.stderr);
+    assert.match(next.stderr, /^UPGRADED plan schema airlock\.plan\/v3 -> airlock\.plan\/v4\n/, `attempt ${attempt}`);
+    assert.doesNotMatch(next.stderr, /risk: critical/);
+    assert.match(next.stdout, /^TASK T1 · builder\n/);
+    assert.match(next.stdout, /AGENT airlock-builder/);
+    assert.equal((await readPlanFile(root)).schema, "airlock.plan/v3");
+  }
+  const status = run(root, ["status"]);
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stderr, /^UPGRADED plan schema/);
+  assert.equal((await readPlanFile(root)).schema, "airlock.plan/v3");
+});
+
+test("UPGRADED notice names critical tasks only when one mapped", async (t) => {
+  const root = await project(t, v3Plan([task("T1", { risk: "critical" }), task("T2", { risk: "light" })]));
+  const next = run(root, ["next"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.match(next.stderr, /^UPGRADED plan schema airlock\.plan\/v3 -> airlock\.plan\/v4 \(risk: critical -> expensive on T1\)\n/);
+});
+
+test("json mode reports upgraded: true in one valid stdout document", async (t) => {
+  const root = await project(t, v3Plan([task("T1", { risk: "standard" })]));
+  const next = run(root, ["next", "--json"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.match(next.stderr, /^UPGRADED plan schema/);
+  const json = JSON.parse(next.stdout);
+  assert.equal(json.upgraded, true);
+  assert.equal(json.task, "T1");
+  assert.equal(json.agent, "airlock-builder");
+  assert.equal("route" in json, false);
+  const status = run(root, ["status", "--json"]);
+  assert.equal(status.status, 0, status.stderr);
+  const statusJson = JSON.parse(status.stdout);
+  assert.equal(statusJson.upgraded, true);
+  assert.equal("routes" in statusJson, false);
+});
+
+test("the UPGRADED notice precedes the PARKED error under --unattended", async (t) => {
+  const plan = v3Plan([task("T1", { risk: "standard" })]);
+  plan.decisions.push({ id: "D1", question: "Deploy now", options: ["yes", "no"], recommendation: "yes", mode: "block", assumed: null, blocks: ["T1"], consumedBy: [], status: "open", answer: null, case: "external" });
+  const root = await project(t, plan);
+  const next = run(root, ["next", "--unattended"]);
+  assert.equal(next.status, 2);
+  assert.match(next.stderr, /UPGRADED plan schema airlock\.plan\/v3 -> airlock\.plan\/v4[\s\S]*PARKED: D1/);
+});
+
+test("a state-mutating command persists the upgraded v4 plan", async (t) => {
+  const root = await project(t, v3Plan([task("T1", { risk: "critical" })]));
+  const start = run(root, ["start", "T1"]);
+  assert.equal(start.status, 0, start.stderr);
+  assert.match(start.stdout, /^STARTED T1\nAGENT airlock-builder\n/);
+  const plan = await readPlanFile(root);
+  assert.equal(plan.schema, "airlock.plan/v4");
+  assert.equal("risk" in plan.tasks[0], false);
+  assert.equal(plan.tasks[0].expensive, true);
+});
+
+test("a mid-doing v3 task resumes and persists as v4 with no router artifacts", async (t) => {
+  const root = await project(t, v3Plan([task("T1", { risk: "standard", status: "doing", startedAt: "2026-08-24T07:00:00.000Z" })]));
+  const start = run(root, ["start", "T1"]);
+  assert.equal(start.status, 0, start.stderr);
+  assert.match(start.stdout, /^STARTED T1 \(resume\)\nAGENT airlock-builder\n/);
+  assert.match(start.stderr, /^UPGRADED plan schema/);
+  const plan = await readPlanFile(root);
+  assert.equal(plan.schema, "airlock.plan/v4");
+  assert.equal("risk" in plan.tasks[0], false);
 });
 
 test("init refuses an empty done criterion", async (t) => {
@@ -134,7 +209,6 @@ test("init refuses an empty done criterion", async (t) => {
 test("CLI entry point runs through a linked package directory", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "airlock-link-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const linked = path.join(root, "airlock");
   await symlink(packageRoot, linked, process.platform === "win32" ? "junction" : "dir");
   const result = spawnSync(process.execPath, [path.join(linked, "scripts", "airlock.mjs"), "help"], { encoding: "utf8" });
@@ -148,88 +222,115 @@ test("init state does not poison the first task boundary", async (t) => {
   execFileSync("git", ["-C", root, "add", "baseline.txt"]);
   execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
   assert.equal(run(root, ["init", "A delivery", "--done", "test passes"]).status, 0);
-  const plan = await readPlan(root);
-  plan.tasks.push({ id: "T1", title: "First task", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null });
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
-  await installTestRoutes(root, plan.tasks);
+  const plan = await readPlanFile(root);
+  assert.equal(plan.schema, "airlock.plan/v4");
+  plan.tasks.push(task("T1", { title: "First task" }));
+  await writePlanFile(root, plan);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
-test("OpenCode bootstrap installs a model-neutral command without replacing the plan", async (t) => {
-  const task = { id: "T1", title: "Bootstrap", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+test("OpenCode bootstrap installs the command and static role agents without replacing the plan", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Bootstrap" })]));
   const before = await readFile(path.join(root, "airlock.plan.json"), "utf8");
   const result = run(root, ["init", "--host", "opencode"]);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(await readFile(path.join(root, "airlock.plan.json"), "utf8"), before);
-  assert.match(await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8"), /airlock next --host opencode/);
+  const shim = await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8");
+  assert.match(shim, /airlock next/);
+  assert.match(shim, /AGENT airlock-/);
+  for (const role of ["builder", "checker", "browser"]) {
+    const agent = await readFile(path.join(root, ".opencode", "agent", `airlock-${role}.md`), "utf8");
+    assert.match(agent, /mode: subagent/);
+    assert.doesNotMatch(agent, /^model:/m);
+    assert.doesNotMatch(agent, /^variant:/m);
+    assert.doesNotMatch(agent, /^tools:/m);
+    if (role === "builder") assert.doesNotMatch(agent, /permission:/);
+    else assert.match(agent, /permission:\n  edit: deny/);
+  }
+  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-builder.md"), "utf8"), /Implement only the printed task/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
-test("OpenCode bootstrap upgrades only the exact legacy command shim", async (t) => {
-  const task = { id: "T1", title: "Bootstrap", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+test("re-running init preserves a customized OpenCode agent file", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  assert.equal(run(root, ["init", "--host", "opencode"]).status, 0);
+  const agentPath = path.join(root, ".opencode", "agent", "airlock-builder.md");
+  await writeFile(agentPath, "---\nmodel: my/custom-model\nmode: subagent\n---\n\ncustom body\n");
+  const again = run(root, ["init", "--host", "opencode"]);
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(await readFile(agentPath, "utf8"), /my\/custom-model/);
+});
+
+test("OpenCode bootstrap auto-upgrades only unmodified packaged command shims", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
   const commandDir = path.join(root, ".opencode", "command");
   const commandPath = path.join(commandDir, "airlock.md");
   await mkdir(commandDir, { recursive: true });
-  const fixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-command-3.1.0.md");
-  await writeFile(commandPath, await readFile(fixture, "utf8"));
-  const upgraded = run(root, ["init", "--host", "opencode"]);
-  assert.equal(upgraded.status, 0, upgraded.stderr);
-  assert.match(await readFile(commandPath, "utf8"), /airlock fallback <id>/);
+  const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
+  const packaged31 = await readFile(path.join(fixtures, "opencode-command-3.1.0-packaged.md"), "utf8");
+  assert.equal(contentHash(packaged31), PACKAGED_31_SHIM_HASH, "fixture must hold the real packaged 3.1 shim bytes");
+  for (const legacy of ["opencode-command-3.1.0.md", "opencode-command-3.1.0-fallback.md", "opencode-command-3.1.0-packaged.md"]) {
+    await writeFile(commandPath, await readFile(path.join(fixtures, legacy), "utf8"));
+    const upgraded = run(root, ["init", "--host", "opencode"]);
+    assert.equal(upgraded.status, 0, upgraded.stderr);
+    const content = await readFile(commandPath, "utf8");
+    assert.match(content, /AGENT airlock-/, legacy);
+    assert.match(content, /airlock#v4\.0\.0/, legacy);
+    assert.doesNotMatch(content, /--host/, legacy);
+  }
 
-  const fallbackFixture = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "opencode-command-3.1.0-fallback.md");
-  await writeFile(commandPath, await readFile(fallbackFixture, "utf8"));
-  const upgradedFallback = run(root, ["init", "--host", "opencode"]);
-  assert.equal(upgradedFallback.status, 0, upgradedFallback.stderr);
-  assert.match(await readFile(commandPath, "utf8"), /--class <class>/);
+  const customizedCurrent = `${await readFile(commandPath, "utf8")}\nProject-specific note.\n`;
+  await writeFile(commandPath, customizedCurrent);
+  const preserved = run(root, ["init", "--host", "opencode"]);
+  assert.equal(preserved.status, 0, preserved.stderr);
+  assert.equal(await readFile(commandPath, "utf8"), customizedCurrent);
 
   await writeFile(commandPath, "custom stale command\n");
   const custom = run(root, ["init", "--host", "opencode"]);
   assert.equal(custom.status, 1);
-  assert.match(custom.stderr, /custom OpenCode Airlock command lacks classified fallback support/);
+  assert.match(custom.stderr, /merge the current packaged command manually/);
   assert.equal(await readFile(commandPath, "utf8"), "custom stale command\n");
 });
 
 test("next, start, audit, and done create an audited task commit", async (t) => {
-  const task = {
-    id: "T1",
-    title: "Write owned feature",
-    role: "builder",
-    risk: "standard",
-    owns: ["src/feature.js"],
-    dependsOn: [],
-    acceptance: "node --test passes",
-    status: "todo",
-    evidence: [],
-    startedAt: null,
-    finishedAt: null,
-    note: null,
-  };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Write owned feature", owns: ["src/feature.js"], acceptance: "node --test passes" })]));
   const next = run(root, ["next"]);
   assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /TASK T1 · builder · test\/claude-builder-standard · medium/);
+  assert.match(next.stdout, /TASK T1 · builder/);
+  assert.match(next.stdout, /AGENT airlock-builder/);
+  assert.doesNotMatch(next.stdout, /ROUTE |FALLBACK/);
   assert.equal(run(root, ["start", "T1"]).status, 0);
-  await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n", { encoding: "utf8" }).catch(async () => {
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(path.join(root, "src"));
-    await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n");
-  });
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n");
   const audit = run(root, ["audit", "T1"]);
   assert.equal(audit.status, 0, audit.stderr);
   assert.match(audit.stdout, /src\/feature.js/);
   const done = run(root, ["done", "T1", "--evidence", "node --test: pass"]);
   assert.equal(done.status, 0, done.stderr);
   assert.match(execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" }), /Airlock-Task: T1/);
-  assert.equal((await readPlan(root)).tasks[0].status, "done");
+  assert.equal((await readPlanFile(root)).tasks[0].status, "done");
+});
+
+test("--host is accepted and ignored on non-init commands", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const next = run(root, ["next", "--host", "opencode"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.match(next.stdout, /TASK T1 · builder/);
+  assert.equal(run(root, ["start", "T1", "--host", "opencode"], { AIRLOCK_HOST: "bogus" }).status, 0);
+  assert.equal(run(root, ["status", "--host", "claude"]).status, 0);
+});
+
+test("render --md replaces the route column with the role", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Write owned feature" })]));
+  const render = run(root, ["render", "--md"]);
+  assert.equal(render.status, 0, render.stderr);
+  assert.match(render.stdout, /\| ID \| Task \| State \| Role \|/);
+  assert.match(render.stdout, /\| T1 \| Write owned feature \| todo \| builder \|/);
+  assert.doesNotMatch(render.stdout, /Route/);
 });
 
 test("audit catches a shell-created out-of-scope path", async (t) => {
-  const task = {
-    id: "T1", title: "Scoped edit", role: "builder", risk: "light", owns: ["src/owned.txt"], dependsOn: [], acceptance: "file exists", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null,
-  };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Scoped edit", owns: ["src/owned.txt"], acceptance: "file exists" })]));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   execFileSync(process.platform === "win32" ? "powershell" : "sh", process.platform === "win32"
     ? ["-NoProfile", "-Command", "New-Item -ItemType Directory -Force src | Out-Null; Set-Content src/owned.txt ok; Set-Content package.json outside"]
@@ -241,20 +342,18 @@ test("audit catches a shell-created out-of-scope path", async (t) => {
 });
 
 test("blocking a failed task preserves its delta and releases the next task", async (t) => {
-  const tasks = ["T1", "T2"].map((id) => ({ id, title: id, role: "builder", risk: "light", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null }));
-  const root = await project(t, basePlan(tasks));
+  const root = await project(t, basePlan(["T1", "T2"].map((id) => task(id))));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   await writeFile(path.join(root, "STRAY.md"), "preserve me\n");
   assert.equal(run(root, ["block", "T1", "--reason", "scope error"]).status, 0);
-  const plan = await readPlan(root);
+  const plan = await readPlanFile(root);
   assert.match(plan.tasks[0].note, /refs\/airlock\/blocked\/T1/);
   assert.equal(run(root, ["start", "T2"]).status, 0);
   assert.equal(execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }).includes("STRAY.md"), false);
 });
 
 test("Airlock recovery preserves the user's stash stack", async (t) => {
-  const task = { id: "T1", title: "Preserve stash", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Preserve stash", owns: ["src/a.js"] })]));
   for (const name of ["USER-WIP-1", "USER-WIP-2"]) {
     await writeFile(path.join(root, `${name}.txt`), `${name}\n`);
     execFileSync("git", ["-C", root, "stash", "push", "--include-untracked", "--message", name]);
@@ -270,14 +369,9 @@ test("Airlock recovery preserves the user's stash stack", async (t) => {
 });
 
 test("blocking a parallel task leaves other lanes untouched", async (t) => {
-  const tasks = [
-    { id: "T1", title: "A", role: "builder", risk: "light", owns: ["a/"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-    { id: "T2", title: "B", role: "builder", risk: "light", owns: ["b/"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-  ];
-  const root = await project(t, basePlan(tasks));
+  const root = await project(t, basePlan([task("T1", { title: "A", owns: ["a/"] }), task("T2", { title: "B", owns: ["b/"] })]));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(path.join(root, "a"));
   await mkdir(path.join(root, "b"));
   await writeFile(path.join(root, "a", "f.js"), "a\n");
@@ -285,7 +379,7 @@ test("blocking a parallel task leaves other lanes untouched", async (t) => {
   await writeFile(path.join(root, "STRAY.md"), "stray\n");
   assert.equal(run(root, ["block", "T1", "--reason", "scope error"]).status, 0);
   assert.equal((await readFile(path.join(root, "b", "f.js"), "utf8")), "b\n");
-  const ref = (await readPlan(root)).tasks[0].note.match(/(refs\/airlock\/blocked\/T1\/\d+)/)?.[1];
+  const ref = (await readPlanFile(root)).tasks[0].note.match(/(refs\/airlock\/blocked\/T1\/\d+)/)?.[1];
   assert.ok(ref);
   const recovered = execFileSync("git", ["-C", root, "ls-tree", "-r", "--name-only", `${ref}^3`], { encoding: "utf8" });
   assert.match(recovered, /a\/f\.js/);
@@ -294,14 +388,9 @@ test("blocking a parallel task leaves other lanes untouched", async (t) => {
 });
 
 test("auditing one parallel task leaves foreign lane paths untouched", async (t) => {
-  const tasks = [
-    { id: "T1", title: "A", role: "builder", risk: "light", owns: ["a/"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-    { id: "T2", title: "B", role: "builder", risk: "light", owns: ["b/"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-  ];
-  const root = await project(t, basePlan(tasks));
+  const root = await project(t, basePlan([task("T1", { title: "A", owns: ["a/"] }), task("T2", { title: "B", owns: ["b/"] })]));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
-  const { mkdir } = await import("node:fs/promises");
   await mkdir(path.join(root, "b"));
   await writeFile(path.join(root, "b", "f.js"), "b\n");
   const audit = run(root, ["audit", "T1", "--revert-out-of-scope"]);
@@ -311,42 +400,33 @@ test("auditing one parallel task leaves foreign lane paths untouched", async (t)
 });
 
 test("failed task commit restores the doing state", async (t) => {
-  const task = { id: "T1", title: "Commit failure", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Commit failure", owns: ["src/a.js"] })]));
   await writeFile(path.join(root, ".git", "hooks", "pre-commit"), process.platform === "win32" ? "@exit /b 1\r\n" : "#!/bin/sh\nexit 1\n");
   if (process.platform !== "win32") execFileSync("chmod", ["+x", path.join(root, ".git", "hooks", "pre-commit")]);
   assert.equal(run(root, ["start", "T1"]).status, 0);
-  await writeFile(path.join(root, "src", "a.js"), "x\n").catch(async () => {
-    const { mkdir } = await import("node:fs/promises");
-    await mkdir(path.join(root, "src"));
-    await writeFile(path.join(root, "src", "a.js"), "x\n");
-  });
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "a.js"), "x\n");
   assert.equal(run(root, ["done", "T1", "--evidence", "pass"]).status, 1);
-  assert.equal((await readPlan(root)).tasks[0].status, "doing");
+  assert.equal((await readPlanFile(root)).tasks[0].status, "doing");
 });
 
 test("checker uses the exact dependency trailer and excludes plan churn", async (t) => {
-  const task = (id, role = "builder", dependsOn = []) => ({ id, title: id, role, risk: "light", owns: [`src/${id}.js`], dependsOn, acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null });
-  const root = await project(t, basePlan([task("T1"), task("T10"), task("T2", "checker", ["T1"])]));
+  const root = await project(t, basePlan([task("T1"), task("T10"), task("T2", { role: "checker", dependsOn: ["T1"] })]));
   for (const id of ["T1", "T10"]) {
     assert.equal(run(root, ["start", id]).status, 0);
-    const directory = path.join(root, "src");
-    await writeFile(path.join(directory, `${id}.js`), `${id}\n`).catch(async () => {
-      const { mkdir } = await import("node:fs/promises");
-      await mkdir(directory);
-      await writeFile(path.join(directory, `${id}.js`), `${id}\n`);
-    });
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "src", `${id}.js`), `${id}\n`);
     assert.equal(run(root, ["done", id, "--evidence", `ev-${id}`]).status, 0);
   }
   const next = run(root, ["next"]);
+  assert.match(next.stdout, /AGENT airlock-checker/);
   assert.match(next.stdout, /DIFF T1[\s\S]*T1/);
   assert.doesNotMatch(next.stdout, /DIFF T1[\s\S]*T10/);
   assert.doesNotMatch(next.stdout, /airlock\.plan\.json/);
 });
 
 test("audit recovery stashes untracked paths instead of deleting them", async (t) => {
-  const task = { id: "T1", title: "Recover", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Recover", owns: ["src/a.js"] })]));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   await writeFile(path.join(root, "scratch.md"), "keep\n");
   const audit = run(root, ["audit", "T1", "--revert-out-of-scope"]);
@@ -358,30 +438,24 @@ test("audit recovery stashes untracked paths instead of deleting them", async (t
 });
 
 test("assumptions are consumed and an overturned answer reopens work", async (t) => {
-  const task = {
-    id: "T1", title: "Choose behavior", role: "builder", risk: "standard", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null,
-  };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Choose behavior", owns: ["src/a.js"] })]));
   const ask = run(root, ["ask", "T1", "Choose mode", "--options", "read-only|editable", "--assume", "read-only"]);
   assert.equal(ask.status, 0, ask.stderr);
   assert.equal(run(root, ["start", "T1"]).status, 0);
-  let plan = await readPlan(root);
+  let plan = await readPlanFile(root);
   plan.tasks[0].status = "done";
   plan.tasks[0].evidence = ["test passes"];
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+  await writePlanFile(root, plan);
   const answer = run(root, ["answer", "D1", "editable"]);
   assert.equal(answer.status, 1);
   assert.match(answer.stderr, /REWORK REQUIRED: T1/);
-  plan = await readPlan(root);
+  plan = await readPlanFile(root);
   assert.equal(plan.tasks[0].status, "todo");
   assert.deepEqual(plan.tasks[0].evidence, []);
 });
 
 test("blocking decisions park only their dependent task", async (t) => {
-  const tasks = ["T1", "T2"].map((id) => ({
-    id, title: id, role: "builder", risk: "light", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null,
-  }));
-  const root = await project(t, basePlan(tasks));
+  const root = await project(t, basePlan(["T1", "T2"].map((id) => task(id))));
   assert.equal(run(root, ["ask", "T1", "Deploy now", "--options", "yes|no", "--blocking", "--case", "external"]).status, 0);
   const next = run(root, ["next"]);
   assert.equal(next.status, 0, next.stderr);
@@ -390,8 +464,7 @@ test("blocking decisions park only their dependent task", async (t) => {
 });
 
 test("unattended next parks blocking decisions without dispatching", async (t) => {
-  const task = { id: "T1", title: "Wait", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
+  const root = await project(t, basePlan([task("T1", { title: "Wait" })]));
   assert.equal(run(root, ["ask", "T1", "Deploy", "--options", "yes|no", "--blocking", "--case", "external"]).status, 0);
   const next = run(root, ["next", "--unattended"]);
   assert.equal(next.status, 2);
@@ -402,7 +475,7 @@ test("goal-level blocking decisions do not require a task", async (t) => {
   const root = await project(t);
   const result = run(root, ["ask", "Is the goal testable", "--options", "yes|no", "--blocking", "--case", "goal"]);
   assert.equal(result.status, 0, result.stderr);
-  const decision = (await readPlan(root)).decisions[0];
+  const decision = (await readPlanFile(root)).decisions[0];
   assert.deepEqual(decision.blocks, []);
   assert.equal(decision.case, "goal");
   assert.match(run(root, ["next"]).stdout, /Waiting on D1/);
@@ -412,10 +485,9 @@ test("goal-level blocking decisions do not require a task", async (t) => {
 test("unborn repositories use normal Airlock boundary behavior", async (t) => {
   const root = await bareProject(t);
   assert.equal(run(root, ["init", "A delivery", "--done", "test passes"]).status, 0);
-  const plan = await readPlan(root);
-  plan.tasks.push({ id: "T1", title: "First", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null });
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
-  await installTestRoutes(root, plan.tasks);
+  const plan = await readPlanFile(root);
+  plan.tasks.push(task("T1", { title: "First" }));
+  await writePlanFile(root, plan);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
@@ -426,456 +498,37 @@ test("next rejects unrecognised positional input", async (t) => {
   assert.match(result.stderr, /accepts no positional arguments/);
 });
 
-test("critical-risk budget parks critical work while allowing lower risks", async (t) => {
-  const tasks = [
-    { id: "T1", title: "Critical", role: "builder", risk: "critical", owns: ["src/critical.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-    { id: "T2", title: "Cheap", role: "builder", risk: "light", owns: ["src/light.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-  ];
-  const plan = basePlan(tasks);
+test("expensive budget parks expensive work while allowing cheap tasks", async (t) => {
+  const plan = basePlan([
+    task("T1", { title: "Expensive", owns: ["src/critical.js"], expensive: true }),
+    task("T2", { title: "Cheap", owns: ["src/light.js"] }),
+  ]);
   plan.budget.maxExpensive = 0;
   const root = await project(t, plan);
   assert.match(run(root, ["next"]).stdout, /TASK T2/);
-  tasks[1].status = "done";
-  tasks[1].evidence = ["pass"];
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+  plan.tasks[1].status = "done";
+  plan.tasks[1].evidence = ["pass"];
+  await writePlanFile(root, plan);
   assert.match(run(root, ["next"]).stdout, /BUDGET REACHED: maxExpensive/);
 });
 
-test("OpenCode configuration creates local model-bound agents with effort", async (t) => {
-  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  const opencodeConfig = path.join(root, "opencode-config");
-  const env = { OPENCODE_CONFIG_DIR: opencodeConfig };
-  const routes = JSON.parse(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"));
-  routes.catalog.opencode["openai/gpt-5.6-luna"] = { variants: ["low", "high"] };
-  await writeProjectRoutes(root, routes);
-  const configured = run(root, ["config", "--project", "--host", "opencode", "--role", "browser", "--risk", "light", "--model", "openai/gpt-5.6-luna", "--effort", "low"], env);
-  assert.equal(configured.status, 0, configured.stderr);
-  const agent = path.join(opencodeConfig, "agents", "airlock-browser-openai-gpt-5-6-luna-low.md");
-  assert.match(await readFile(agent, "utf8"), /model: openai\/gpt-5\.6-luna/);
-  assert.match(await readFile(agent, "utf8"), /variant: low/);
-  const next = run(root, ["next", "--host", "opencode"], env);
+test("an explicit expensive: false is not counted against the budget", async (t) => {
+  const plan = basePlan([task("T1", { expensive: false })]);
+  plan.budget.maxExpensive = 0;
+  const root = await project(t, plan);
+  const next = run(root, ["next"]);
   assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /AGENT airlock-browser-openai-gpt-5-6-luna-low/);
-});
-
-test("OpenCode lifecycle commands keep the host explicit and release their active pin", async (t) => {
-  const task = { id: "T1", title: "Loop", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/open": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/open", effort: "low" } } } });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["next", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  await mkdir(path.join(root, "src"), { recursive: true });
-  await writeFile(path.join(root, "src", "a.js"), "ok\n");
-  assert.equal(run(root, ["audit", "T1", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["done", "T1", "--host", "opencode", "--evidence", "test: pass"]).status, 0);
-  const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
-  assert.deepEqual(state.pins, {});
-});
-
-test("version 1 OpenCode routes reject variants outside the declared model catalog", async (t) => {
-  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/model": { variants: ["low"] } } }, claude: {}, opencode: { browser: { light: { model: "test/model", effort: "TOTALLY-BOGUS" } } } });
-  const next = run(root, ["next", "--host", "opencode"]);
-  assert.equal(next.status, 1);
-  assert.match(next.stderr, /does not declare variant TOTALLY-BOGUS/);
-  assert.ok(next.stderr.includes(path.join(testEnv(root).AIRLOCK_CONFIG_DIR, "models.json")));
-  assert.match(next.stderr, /opencode models test --verbose/);
-  const sync = run(root, ["config", "--sync", "--host", "opencode"]);
-  assert.equal(sync.status, 1);
-  assert.match(sync.stderr, /does not declare variant TOTALLY-BOGUS/);
-  const invalidAgent = path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", "airlock-browser-test-model-totally-bogus.md");
-  assert.equal(await readFile(invalidAgent, "utf8").then(() => true, () => false), false);
-});
-
-test("init reports route bootstrap commands for task roles that are not configured", async (t) => {
-  const root = await bareProject(t);
-  const task = { id: "T1", title: "Bootstrap", role: "checker", risk: "complex", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(basePlan([task]), null, 2)}\n`);
-  const init = run(root, ["init", "--host", "opencode"]);
-  assert.equal(init.status, 0, init.stderr);
-  assert.match(init.stdout, /airlock config --host opencode --role checker --risk complex --model <model> --effort <effort>/);
-});
-
-test("version 2 OpenCode routes select UTC windows and pin the dispatched agent", async (t) => {
-  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  const opencodeConfig = path.join(root, "opencode-config");
-  const env = { OPENCODE_CONFIG_DIR: opencodeConfig, AIRLOCK_CONFIG_DIR: path.join(root, "empty-airlock-config"), AIRLOCK_NOW: "2026-08-24T07:00:00.000Z" };
-  await writeProjectRoutes(root, {
-    version: 2,
-    catalog: { opencode: { "test/default": { variants: ["low"] }, "test/peak": { variants: ["high"] } } },
-    claude: {},
-    opencode: { browser: { light: { model: "test/default", effort: "low", windows: [{ name: "peak", days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], utc: "06:00-10:00", model: "test/peak", effort: "high" }] } } },
-  });
-  const sync = run(root, ["config", "--sync", "--host", "opencode"], env);
-  assert.equal(sync.status, 0, sync.stderr);
-  const next = run(root, ["next", "--host", "opencode", "--json"], env);
-  assert.equal(next.status, 0, next.stderr);
-  const json = JSON.parse(next.stdout);
-  assert.match(json.text, /ROUTE PINNED · peak/);
-  assert.match(json.text, /CLOCK OVERRIDE · AIRLOCK_NOW=2026-08-24T07:00:00\.000Z/);
-  assert.match(json.text, /AGENT airlock-browser-test-peak-high/);
-  assert.deepEqual({ route: json.route.route, state: json.route.state, pinned: json.route.pinned, agent: json.route.agent }, { route: "peak", state: "PINNED", pinned: true, agent: "airlock-browser-test-peak-high" });
-
-  const routes = JSON.parse(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"));
-  delete routes.opencode.browser.light.windows;
-  await writeProjectRoutes(root, routes);
-  await mkdir(path.join(opencodeConfig, "agent"), { recursive: true });
-  await writeFile(path.join(opencodeConfig, "agent", "airlock-legacy.md"), "legacy\n");
-  const protectedPrune = run(root, ["config", "--sync", "--prune", "--host", "opencode"], env);
-  assert.equal(protectedPrune.status, 0, protectedPrune.stderr);
-  assert.match(protectedPrune.stdout, /STALE[\s\S]*airlock-browser-test-peak-high\.md/);
-  assert.match(protectedPrune.stdout, /LEGACY[\s\S]*airlock-legacy\.md/);
-  assert.equal(await readFile(path.join(opencodeConfig, "agents", "airlock-browser-test-peak-high.md"), "utf8").then(() => true, () => false), true);
-  assert.equal(run(root, ["block", "T1", "--host", "opencode", "--reason", "stop"], env).status, 0);
-  const releasedPrune = run(root, ["config", "--sync", "--prune", "--host", "opencode"], env);
-  assert.match(releasedPrune.stdout, /PRUNED[\s\S]*airlock-browser-test-peak-high\.md/);
-});
-
-test("version 3 routes pin the complete fallback chain selected by the UTC window", async (t) => {
-  const tasks = ["T1", "T2"].map((id) => ({ id, title: id, role: "builder", risk: "standard", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null }));
-  const root = await project(t, basePlan(tasks));
-  const models = ["test/offpeak", "test/peak", "test/secondary", "test/last"];
-  await writeProjectRoutes(root, {
-    version: 3,
-    catalog: { opencode: Object.fromEntries(models.map((model) => [model, { variants: ["low"] }])) },
-    claude: {},
-    opencode: { builder: { standard: {
-      model: "test/offpeak",
-      effort: "low",
-      fallbacks: [{ model: "test/secondary", effort: "low" }, { model: "test/last", effort: "low" }],
-      windows: [{ name: "weekday-peak", days: ["mon", "tue", "wed", "thu", "fri"], utc: "06:00-10:00", model: "test/peak", effort: "low", fallbacks: [{ model: "test/offpeak", effort: "low" }, { model: "test/last", effort: "low" }] }],
-    } } },
-  });
-  const peak = { AIRLOCK_NOW: "2026-08-24T07:00:00.000Z" };
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], peak).status, 0);
-  await rm(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", "airlock-builder-test-last-low.md"));
-  const missingFallback = run(root, ["next", "--host", "opencode"], peak);
-  assert.equal(missingFallback.status, 1);
-  assert.match(missingFallback.stderr, /missing generated opencode agent.*test-last-low/);
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], peak).status, 0);
-  const nextPeak = run(root, ["next", "--host", "opencode", "--json"], peak);
-  assert.equal(nextPeak.status, 0, nextPeak.stderr);
-  const peakJson = JSON.parse(nextPeak.stdout);
-  assert.deepEqual(peakJson.route.candidates.map(({ model }) => model), ["test/peak", "test/offpeak", "test/last"]);
-  assert.match(peakJson.text, /FALLBACK 1 airlock-builder-test-offpeak-low/);
-  assert.equal(run(root, ["block", "T1", "--host", "opencode", "--reason", "skip"], peak).status, 0);
-
-  const offpeak = { AIRLOCK_NOW: "2026-08-24T11:00:00.000Z" };
-  const nextOffpeak = run(root, ["next", "--host", "opencode", "--json"], offpeak);
-  assert.equal(nextOffpeak.status, 0, nextOffpeak.stderr);
-  assert.deepEqual(JSON.parse(nextOffpeak.stdout).route.candidates.map(({ model }) => model), ["test/offpeak", "test/secondary", "test/last"]);
-});
-
-test("fallback advances a clean doing task and protects every pinned candidate from pruning", async (t) => {
-  const task = { id: "T1", title: "Fallback", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  const models = ["test/primary", "test/secondary", "test/last", "test/replacement"];
-  await writeProjectRoutes(root, {
-    version: 3,
-    catalog: { opencode: Object.fromEntries(models.map((model) => [model, { variants: ["low"] }])) },
-    claude: {},
-    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }, { model: "test/last", effort: "low" }] } } },
-  });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  const missingClass = run(root, ["fallback", "T1", "--host", "opencode", "--reason", "provider timeout"]);
-  assert.equal(missingClass.status, 1);
-  assert.match(missingClass.stderr, /--class is required/);
-  const invalidClass = run(root, ["fallback", "T1", "--host", "opencode", "--class", "refusal", "--reason", "provider timeout"]);
-  assert.equal(invalidClass.status, 1);
-  assert.match(invalidClass.stderr, /--class must be one of/);
-  const first = run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout", "--json"]);
-  assert.equal(first.status, 0, first.stderr);
-  assert.equal(JSON.parse(first.stdout).route.model, "test/secondary");
-  assert.equal(JSON.parse(first.stdout).route.failures[0].class, "timeout");
-  const second = run(root, ["fallback", "T1", "--host", "opencode", "--class", "rate-limit", "--reason", "rate limited", "--json"]);
-  assert.equal(second.status, 0, second.stderr);
-  const secondJson = JSON.parse(second.stdout);
-  assert.equal(secondJson.route.model, "test/last");
-  assert.equal(secondJson.route.failures.length, 2);
-  const exhausted = run(root, ["fallback", "T1", "--host", "opencode", "--class", "model-unavailable", "--reason", "unavailable"]);
-  assert.equal(exhausted.status, 1);
-  assert.match(exhausted.stderr, /NO FALLBACK/);
-  const statePath = path.join(root, ".git", "airlock", "router-state.json");
-  const overlongState = JSON.parse(await readFile(statePath, "utf8"));
-  Object.values(overlongState.pins)[0].candidates.push({ model: "test/fourth", effort: "low", agent: "airlock-builder-test-fourth-low" });
-  await writeFile(statePath, `${JSON.stringify(overlongState, null, 2)}\n`);
-  const limited = run(root, ["fallback", "T1", "--host", "opencode", "--class", "transport", "--reason", "network error"]);
-  assert.equal(limited.status, 1);
-  assert.match(limited.stderr, /FALLBACK LIMIT/);
-
-  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/replacement": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/replacement", effort: "low" } } } });
-  const protectedPrune = run(root, ["config", "--sync", "--prune", "--host", "opencode"]);
-  assert.equal(protectedPrune.status, 0, protectedPrune.stderr);
-  for (const model of ["primary", "secondary", "last"]) {
-    assert.equal(await readFile(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", `airlock-builder-test-${model}-low.md`), "utf8").then(() => true, () => false), true);
-  }
-  assert.equal(run(root, ["block", "T1", "--host", "opencode", "--reason", "stop"]).status, 0);
-  assert.equal(run(root, ["config", "--sync", "--prune", "--host", "opencode"]).status, 0);
-  for (const model of ["primary", "secondary", "last"]) {
-    assert.equal(await readFile(path.join(testEnv(root).OPENCODE_CONFIG_DIR, "agents", `airlock-builder-test-${model}-low.md`), "utf8").then(() => true, () => false), false);
-  }
-});
-
-test("fallback refuses to redispatch after a failed attempt changes the worktree", async (t) => {
-  const task = { id: "T1", title: "Dirty fallback", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, {
-    version: 3,
-    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
-    claude: {},
-    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
-  });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  await mkdir(path.join(root, "src"), { recursive: true });
-  await writeFile(path.join(root, "src", "a.js"), "partial\n");
-  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--class", "transport", "--reason", "transport error"]);
-  assert.equal(fallback.status, 1);
-  assert.match(fallback.stderr, /failed attempt left changes in src\/a\.js/);
-  const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
-  assert.equal(Object.values(state.pins)[0].candidateIndex, 0);
-});
-
-test("fallback renders the requested lane when parallel tasks are doing", async (t) => {
-  const tasks = ["T1", "T2"].map((id) => ({ id, title: id, role: "builder", risk: "light", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null }));
-  const root = await project(t, basePlan(tasks));
-  await writeProjectRoutes(root, {
-    version: 3,
-    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
-    claude: {},
-    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
-  });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T2", "--host", "opencode", "--parallel"]).status, 0);
-  const fallback = run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout"]);
-  assert.equal(fallback.status, 0, fallback.stderr);
-  assert.match(fallback.stdout, /TASK T1/);
-  assert.doesNotMatch(fallback.stdout, /TASK T2/);
-});
-
-test("done archives the executing fallback route by task and commit", async (t) => {
-  const task = { id: "T1", title: "Archive route", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, {
-    version: 3,
-    catalog: { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["low"] } } },
-    claude: {},
-    opencode: { builder: { light: { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] } } },
-  });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["fallback", "T1", "--host", "opencode", "--class", "timeout", "--reason", "provider timeout"]).status, 0);
-  await mkdir(path.join(root, "src"), { recursive: true });
-  await writeFile(path.join(root, "src", "a.js"), "complete\n");
-  const done = run(root, ["done", "T1", "--host", "opencode", "--evidence", "node --test: pass", "--json"]);
-  assert.equal(done.status, 0, done.stderr);
-  const commit = JSON.parse(done.stdout).commit;
-  const state = JSON.parse(await readFile(path.join(root, ".git", "airlock", "router-state.json"), "utf8"));
-  assert.deepEqual(state.pins, {});
-  const [key, completed] = Object.entries(state.completed)[0];
-  assert.equal(key, `T1:${commit}:opencode`);
-  assert.equal(completed.model, "test/secondary");
-  assert.equal(completed.candidateIndex, 1);
-  assert.equal(completed.failures[0].class, "timeout");
-  assert.equal(completed.commit, commit);
-});
-
-test("version 1 router pins load as one-candidate chains and upgrade on write", async (t) => {
-  const task = { id: "T1", title: "Legacy pin", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, { version: 1, catalog: { opencode: { "test/legacy": { variants: ["low"] } } }, claude: {}, opencode: { builder: { light: { model: "test/legacy", effort: "low" } } } });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"]).status, 0);
-  assert.equal(run(root, ["next", "--host", "opencode"]).status, 0);
-  const statePath = path.join(root, ".git", "airlock", "router-state.json");
-  const current = JSON.parse(await readFile(statePath, "utf8"));
-  const [key, pin] = Object.entries(current.pins)[0];
-  const legacy = { version: 1, pins: { [key]: { model: pin.model, effort: pin.effort, agent: pin.agent, name: pin.name, evaluatedAt: pin.evaluatedAt, expiresAt: pin.expiresAt } } };
-  await writeFile(statePath, `${JSON.stringify(legacy, null, 2)}\n`);
-
-  const start = run(root, ["start", "T1", "--host", "opencode", "--json"]);
-  assert.equal(start.status, 0, start.stderr);
-  assert.equal(JSON.parse(start.stdout).route.candidates.length, 1);
-  assert.equal(JSON.parse(await readFile(statePath, "utf8")).version, 2);
-});
-
-test("fallback configuration fails closed on old versions, duplicates, and unknown variants", async (t) => {
-  const root = await project(t);
-  const route = { model: "test/primary", effort: "low", fallbacks: [{ model: "test/secondary", effort: "low" }] };
-  const catalog = { opencode: { "test/primary": { variants: ["low"] }, "test/secondary": { variants: ["high"] } } };
-  await writeProjectRoutes(root, { version: 2, catalog, claude: {}, opencode: { builder: { light: route } } });
-  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /fallbacks require version 3/);
-  await writeProjectRoutes(root, { version: 3, catalog, claude: {}, opencode: { builder: { light: route } } });
-  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /does not declare variant low/);
-  route.fallbacks = [{ model: "test/primary", effort: "low" }];
-  await writeProjectRoutes(root, { version: 3, catalog, claude: {}, opencode: { builder: { light: route } } });
-  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /duplicate fallback candidate/);
-  route.fallbacks = ["secondary", "third", "fourth"].map((model) => ({ model: `test/${model}`, effort: "low" }));
-  await writeProjectRoutes(root, { version: 3, catalog: { opencode: {} }, claude: {}, opencode: { builder: { light: route } } });
-  assert.match(run(root, ["config", "--sync", "--host", "opencode"]).stderr, /fallbacks cannot exceed 2 candidates/);
-});
-
-test("an offered route expires before a later start and status agrees while it is live", async (t) => {
-  const task = { id: "T1", title: "Expire", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  await writeProjectRoutes(root, {
-    version: 2,
-    catalog: { opencode: { "test/default": { variants: ["low"] }, "test/peak": { variants: ["high"] } } },
-    claude: {},
-    opencode: { browser: { light: { model: "test/default", effort: "low", windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "test/peak", effort: "high" }] } } },
-  });
-  const atOffer = { AIRLOCK_NOW: "2026-08-24T07:30:00.000Z" };
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], atOffer).status, 0);
-  assert.match(run(root, ["next", "--host", "opencode"], atOffer).stdout, /ROUTE PINNED · peak/);
-  assert.match(run(root, ["status", "--host", "opencode"], atOffer).stdout, /NEXT[\s\S]*test\/peak · PINNED/);
-  const start = run(root, ["start", "T1", "--host", "opencode"], { AIRLOCK_NOW: "2026-08-24T11:00:00.000Z" });
-  assert.equal(start.status, 0, start.stderr);
-  assert.match(start.stdout, /ROUTE PINNED · default/);
-  assert.match(start.stdout, /CLOCK OVERRIDE|AGENT airlock-browser-test-default-low/);
-  assert.equal((await readPlan(root)).tasks[0].startedAt, "2026-08-24T11:00:00.000Z");
-});
-
-test("a pre-3.1 doing task recovers its route from startedAt", async (t) => {
-  const task = { id: "T1", title: "Recover", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "doing", evidence: [], startedAt: "2026-08-24T07:00:00.000Z", finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  const env = { AIRLOCK_NOW: "2026-08-24T11:00:00.000Z" };
-  await writeProjectRoutes(root, {
-    version: 2,
-    catalog: { opencode: { "test/default": { variants: ["low"] }, "test/peak": { variants: ["high"] } } },
-    claude: {},
-    opencode: { browser: { light: { model: "test/default", effort: "low", windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "test/peak", effort: "high" }] } } },
-  });
-  assert.equal(run(root, ["config", "--sync", "--host", "opencode"], env).status, 0);
-  const next = run(root, ["next", "--host", "opencode"], env);
-  assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /ROUTE RECOVERED · peak · evaluated 2026-08-24T07:00:00\.000Z/);
-  assert.match(next.stdout, /AGENT airlock-browser-test-peak-high/);
-});
-
-test("version 2 config updates defaults without dropping windows or writing an invalid route", async (t) => {
-  const root = await project(t);
-  const routes = { version: 2, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "low", windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "opus", effort: "high" }] } } }, opencode: {} };
-  await writeProjectRoutes(root, routes);
-  const changed = run(root, ["config", "--project", "--host", "claude", "--role", "builder", "--risk", "light", "--model", "haiku", "--effort", "medium"]);
-  assert.equal(changed.status, 0, changed.stderr);
-  const stored = JSON.parse(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"));
-  assert.equal(stored.claude.builder.light.model, "haiku");
-  assert.deepEqual(stored.claude.builder.light.windows, routes.claude.builder.light.windows);
-
-  stored.opencode = { browser: { light: { model: "test/model", effort: "high" } } };
-  await writeProjectRoutes(root, stored);
-  const before = await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8");
-  const invalid = run(root, ["config", "--project", "--host", "opencode", "--role", "browser", "--risk", "light", "--model", "test/missing", "--effort", "high"]);
-  assert.equal(invalid.status, 1);
-  assert.equal(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"), before);
-
-  const version3 = { version: 3, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "low", fallbacks: [{ model: "opus", effort: "high" }], windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "opus", effort: "high", fallbacks: [{ model: "sonnet", effort: "low" }] }] } } }, opencode: {} };
-  await writeProjectRoutes(root, version3);
-  const changedV3 = run(root, ["config", "--project", "--host", "claude", "--role", "builder", "--risk", "light", "--model", "haiku", "--effort", "medium"]);
-  assert.equal(changedV3.status, 0, changedV3.stderr);
-  const storedV3 = JSON.parse(await readFile(path.join(root, ".git", "airlock", "models.json"), "utf8"));
-  assert.deepEqual(storedV3.claude.builder.light.fallbacks, version3.claude.builder.light.fallbacks);
-  assert.deepEqual(storedV3.claude.builder.light.windows, version3.claude.builder.light.windows);
-});
-
-test("merged version 1 OpenCode routes remain compatible beside version 2 Claude routes", async (t) => {
-  const root = await project(t);
-  const env = testEnv(root);
-  await mkdir(env.AIRLOCK_CONFIG_DIR, { recursive: true });
-  await writeFile(path.join(env.AIRLOCK_CONFIG_DIR, "models.json"), `${JSON.stringify({ version: 1, catalog: { opencode: { "test/legacy": { variants: ["medium"] } } }, claude: {}, opencode: { browser: { light: { model: "test/legacy", effort: "medium" } } } }, null, 2)}\n`);
-  await writeProjectRoutes(root, { version: 2, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "low", windows: [{ name: "peak", days: ["mon"], utc: "06:00-10:00", model: "opus", effort: "high" }] } } }, opencode: {} });
-  const sync = run(root, ["config", "--sync", "--host", "opencode"]);
-  assert.equal(sync.status, 0, sync.stderr);
-  assert.equal(await readFile(path.join(env.OPENCODE_CONFIG_DIR, "agents", "airlock-browser-test-legacy-medium.md"), "utf8").then(() => true, () => false), true);
-});
-
-test("version 2 rejects overlapping and overnight UTC windows", async (t) => {
-  const root = await project(t);
-  const base = { version: 2, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "low", windows: [{ name: "one", days: ["mon"], utc: "06:00-10:00", model: "sonnet", effort: "low" }, { name: "two", days: ["mon"], utc: "09:00-11:00", model: "sonnet", effort: "low" }] } } }, opencode: {} };
-  await writeProjectRoutes(root, base);
-  const overlap = run(root, ["config", "--sync", "--host", "claude"], { AIRLOCK_CLAUDE_AGENT_DIR: path.join(root, "claude-agents"), AIRLOCK_CONFIG_DIR: path.join(root, "empty-airlock-config") });
-  assert.equal(overlap.status, 1);
-  assert.match(overlap.stderr, /overlap/);
-  base.claude.builder.light.windows = [{ name: "night", days: ["mon"], utc: "22:00-02:00", model: "sonnet", effort: "low" }];
-  await writeProjectRoutes(root, base);
-  const overnight = run(root, ["config", "--sync", "--host", "claude"], { AIRLOCK_CLAUDE_AGENT_DIR: path.join(root, "claude-agents"), AIRLOCK_CONFIG_DIR: path.join(root, "empty-airlock-config") });
-  assert.equal(overnight.status, 1);
-  assert.match(overnight.stderr, /22:00-24:00 and 00:00-02:00/);
-  base.claude.builder.light.windows = [
-    { name: "late", days: ["mon"], utc: "22:00-24:00", model: "sonnet", effort: "low" },
-    { name: "early", days: ["tue"], utc: "00:00-02:00", model: "sonnet", effort: "low" },
-  ];
-  await writeProjectRoutes(root, base);
-  assert.equal(run(root, ["config", "--sync", "--host", "claude"], { AIRLOCK_CLAUDE_AGENT_DIR: path.join(root, "claude-agents"), AIRLOCK_CONFIG_DIR: path.join(root, "empty-airlock-config") }).status, 0);
-});
-
-test("Claude sync generates effort-bound agents and rejects a shadowing project agent", async (t) => {
-  const task = { id: "T1", title: "Route", role: "builder", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  const root = await project(t, basePlan([task]));
-  const agents = path.join(root, "claude-agents");
-  const env = { AIRLOCK_CONFIG_DIR: path.join(root, "empty-airlock-config"), AIRLOCK_CLAUDE_AGENT_DIR: agents };
-  await writeProjectRoutes(root, { version: 2, catalog: {}, claude: { builder: { light: { model: "sonnet", effort: "high" } } }, opencode: {} });
-  const sync = run(root, ["config", "--sync", "--host", "claude"], env);
-  assert.equal(sync.status, 0, sync.stderr);
-  const agent = path.join(agents, "airlock-builder-sonnet-high.md");
-  const generated = await readFile(agent, "utf8");
-  assert.match(generated, /model: sonnet/);
-  assert.match(generated, /effort: high/);
-  assert.match(generated, /tools: Read, Glob, Grep, Bash, PowerShell, Edit, Write, NotebookEdit/);
-  assert.doesNotMatch(generated, /mode: subagent|permission:/);
-  await mkdir(path.join(root, ".claude", "agents"), { recursive: true });
-  await writeFile(path.join(root, ".claude", "agents", "airlock-builder-sonnet-high.md"), "shadow\n");
-  const next = run(root, ["next", "--host", "claude"], env);
-  assert.equal(next.status, 1);
-  assert.match(next.stderr, /shadows local Airlock route/);
-  const shadowedSync = run(root, ["config", "--sync", "--host", "claude"], env);
-  assert.equal(shadowedSync.status, 1);
-  assert.match(shadowedSync.stderr, /shadows local Airlock route/);
-  await rm(path.join(root, ".claude"), { recursive: true, force: true });
-  const overridden = run(root, ["next", "--host", "claude"], { ...env, CLAUDE_CODE_SUBAGENT_MODEL: "opus" });
-  assert.equal(overridden.status, 1);
-  assert.match(overridden.stderr, /CLAUDE_CODE_SUBAGENT_MODEL overrides Airlock routing/);
-  await rm(agent);
-  const missing = run(root, ["next", "--host", "claude"], env);
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /missing generated claude agent/);
-  const statePath = path.join(root, ".git", "airlock", "router-state.json");
-  assert.equal(await readFile(statePath, "utf8").then(() => true, () => false), false);
+  assert.match(next.stdout, /TASK T1 · builder/);
 });
 
 test("parallel tasks with disjoint glob prefixes may start together", async (t) => {
-  const tasks = [
-    { id: "T1", title: "A", role: "builder", risk: "light", owns: ["src/a*.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-    { id: "T2", title: "B", role: "builder", risk: "light", owns: ["src/b*.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null },
-  ];
-  const root = await project(t, basePlan(tasks));
+  const root = await project(t, basePlan([task("T1", { title: "A", owns: ["src/a*.js"] }), task("T2", { title: "B", owns: ["src/b*.js"] })]));
   assert.equal(run(root, ["start", "T1"]).status, 0);
   assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
 });
 
-test("missing local routes fail closed and plans cannot pin a model", async (t) => {
-  const root = await bareProject(t);
-  const configDir = path.join(root, "empty-airlock-config");
-  const env = { AIRLOCK_CONFIG_DIR: configDir };
-  const task = { id: "T1", title: "Route", role: "browser", risk: "light", owns: ["src/a.js"], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null };
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(basePlan([task]), null, 2)}\n`);
-  const missing = run(root, ["next", "--host", "opencode"], env);
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /missing local route for opencode\/browser\/light/);
-  task.model = "openai/gpt-5.6-luna";
-  await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(basePlan([task]), null, 2)}\n`);
-  const pinned = run(root, ["next"], env);
-  assert.equal(pinned.status, 1);
-  assert.match(pinned.stderr, /model is not supported/);
-});
-
 test("prompt surface contains only the slim roles and two shims", async () => {
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const root = packageRoot;
   const files = [
     ...(await readdir(path.join(root, "commands"))).map((name) => path.join(root, "commands", name)),
     ...(await readdir(path.join(root, "roles"))).map((name) => path.join(root, "roles", name)),
@@ -886,27 +539,33 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     0,
   );
   assert.ok(bytes <= 5_000, `prompt surface is ${bytes} bytes; ceiling is 5000`);
-  for (const role of ["builder.md", "checker.md", "browser.md"]) {
-    const size = Buffer.byteLength(await readFile(path.join(root, "roles", role), "utf8"), "utf8");
-    assert.ok(size <= 800, `${role} is ${size} bytes; ceiling is 800`);
+  for (const role of ["builder", "checker", "browser"]) {
+    const text = await readFile(path.join(root, "roles", `${role}.md`), "utf8");
+    const size = Buffer.byteLength(text, "utf8");
+    assert.ok(size <= 800, `${role}.md is ${size} bytes; ceiling is 800`);
+    assert.match(text, new RegExp(`^name: airlock-${role}$`, "m"));
   }
   for (const command of ["commands/airlock.md", ".opencode/command/airlock.md"]) {
     const text = await readFile(path.join(root, command), "utf8");
     assert.match(text, /unattended/);
-    assert.match(text, /fallback <id>/);
-    assert.match(text, /before any child result/);
-    assert.match(text, /--class <class>/);
-    assert.match(text, /Never fallback after any child result/);
+    assert.match(text, /AGENT airlock-/);
+    assert.doesNotMatch(text, /fallback <id>/);
+    assert.doesNotMatch(text, /--class <class>/);
+    assert.doesNotMatch(text, /Never fallback after any child result/);
+    assert.doesNotMatch(text, /--host/);
   }
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  assert.equal(packageJson.version, "4.0.0");
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
   assert.ok(packageJson.files.includes("scripts/airlock.mjs"));
+  assert.ok(packageJson.files.includes("roles"));
   assert.ok(packageJson.files.includes(".opencode/command/airlock.md"));
-  assert.match(await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8"), /airlock#v3\.1\.0/);
-  assert.doesNotMatch(await readFile(path.join(root, "commands", "airlock.md"), "utf8"), /using the model it names/);
   const openCodeShim = await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8");
-  for (const command of ["start <id>", "audit <id>", "done <id>", "block <id>"]) assert.match(openCodeShim, new RegExp(`${command.replace(/[<>]/g, "\\$&")}[^.]*--host opencode`));
-  const claudeShim = await readFile(path.join(root, "commands", "airlock.md"), "utf8");
-  for (const command of ["start <id>", "audit <id>", "done <id>", "block <id>"]) assert.match(claudeShim, new RegExp(`${command.replace(/[<>]/g, "\\$&")}[^.]*--host claude`));
-  assert.match(await readFile(path.join(root, ".opencode/command/airlock.md"), "utf8"), /npm install --global github:ivan-tretyakov\/airlock#v3\.0\.0/);
+  assert.match(openCodeShim, /npm install --global github:ivan-tretyakov\/airlock#v4\.0\.0/);
+  assert.doesNotMatch(openCodeShim, /#v3\.0\.0|#v3\.1\.0/);
+  const plugin = JSON.parse(await readFile(path.join(root, ".claude-plugin", "plugin.json"), "utf8"));
+  assert.equal(plugin.version, "4.0.0");
+  assert.deepEqual(plugin.agents, ["./roles/builder.md", "./roles/checker.md", "./roles/browser.md"]);
+  const marketplace = JSON.parse(await readFile(path.join(root, ".claude-plugin", "marketplace.json"), "utf8"));
+  assert.equal(marketplace.plugins[0].version, "4.0.0");
 });
