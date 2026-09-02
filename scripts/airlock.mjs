@@ -18,6 +18,7 @@ const LEGACY_OPENCODE_COMMAND_HASHES = new Set([
   "93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e",
   "e0073a668602070e7cb2e9a78c916a75628848bcf2a23f2c8e930b8b69f54997",
   "9201872f0c11c80d2a76b90bd14afc911943f7cf2923bd4212798a07eaba6e8e",
+  "4b4d5b3a87bca1afd8b8bdcd2c1acc35960d62ac0d200c0373e881782fc792ca",
 ]);
 let commandTimestamp = null;
 let planUpgraded = false;
@@ -134,6 +135,9 @@ function validatePlan(plan) {
   if (!plan.budget || !Number.isSafeInteger(plan.budget.maxTasks) || plan.budget.maxTasks < 1 || !Number.isSafeInteger(plan.budget.maxExpensive) || plan.budget.maxExpensive < 0) {
     throw new AirlockError("budget must contain positive maxTasks and non-negative maxExpensive integers");
   }
+  if (plan.budget.reviewLines !== undefined && (!Number.isSafeInteger(plan.budget.reviewLines) || plan.budget.reviewLines < 1)) {
+    throw new AirlockError("budget.reviewLines must be a positive integer");
+  }
   if (!Array.isArray(plan.tasks)) throw new AirlockError("tasks must be an array");
   if (!Array.isArray(plan.decisions)) throw new AirlockError("decisions must be an array");
   if (plan.tasks.length > plan.budget.maxTasks) throw new AirlockError(`tasks exceed budget.maxTasks (${plan.budget.maxTasks})`);
@@ -150,6 +154,7 @@ function validatePlan(plan) {
     if ("risk" in task) throw new AirlockError(`task ${task.id} risk was removed in v4; use expensive: true for critical-cost tasks`);
     if (task.expensive !== undefined && typeof task.expensive !== "boolean") throw new AirlockError(`task ${task.id} expensive must be a boolean`);
     if (task.model !== undefined) throw new AirlockError(`task ${task.id} model is not supported; model choice belongs to the host agent files`);
+    if (task.diffLines !== undefined && (!Number.isSafeInteger(task.diffLines) || task.diffLines < 0)) throw new AirlockError(`task ${task.id} diffLines must be a non-negative integer`);
     assertArrayOfStrings(task.owns, `task ${task.id} owns`, 1);
     if (task.owns.some((owned) => path.isAbsolute(owned) || normalizePath(owned).startsWith("../"))) {
       throw new AirlockError(`task ${task.id} owns must be repository-relative paths or globs`);
@@ -383,6 +388,27 @@ function isExpensive(task) {
   return task.expensive === true;
 }
 
+function reviewState(plan) {
+  const budget = plan.budget?.reviewLines;
+  if (budget === undefined) return null;
+  const used = plan.tasks
+    .filter((task) => task.status === "done")
+    .reduce((sum, task) => sum + (task.diffLines ?? 0), 0);
+  return { used, budget, exceeded: used > budget };
+}
+
+function stagedDiffLines(root, paths) {
+  if (paths.length === 0) return 0;
+  return git(root, ["diff", "--cached", "--numstat", "--", ...paths])
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .reduce((sum, line) => {
+      const [added, deleted] = line.split("\t");
+      if (added === "-" || deleted === "-") return sum;
+      return sum + Number(added) + Number(deleted);
+    }, 0);
+}
+
 function budgetState(plan) {
   const completed = plan.tasks.filter((task) => task.status === "done").length;
   if (completed >= plan.budget.maxTasks) return "task";
@@ -464,6 +490,8 @@ function nextText(root, plan) {
 function statusText(plan) {
   const done = plan.tasks.filter((task) => task.status === "done").length;
   const lines = [`GOAL  ${plan.goal}        ${done}/${plan.tasks.length} done`];
+  const review = reviewState(plan);
+  if (review) lines.push(`REVIEW  ${review.used}/${review.budget} lines${review.exceeded ? " (exceeded)" : ""}`);
   const blocking = plan.decisions.filter((decision) => decision.status === "open" && (decision.mode ?? "assume") === "block");
   const assumed = plan.decisions.filter((decision) => decision.status === "open" && (decision.mode ?? "assume") === "assume");
   const doing = plan.tasks.filter((task) => task.status === "doing");
@@ -495,14 +523,12 @@ function nextDecisionId(plan) {
   return `D${number}`;
 }
 
-function taskCommit(root, planPath, task, evidence, plan) {
-  const audit = auditTask(root, planPath, task, undefined, plan);
-  if (audit.outOfScope.length) throw new AirlockError(`audit failed; out-of-scope paths: ${audit.outOfScope.join(", ")}`);
+function commitTask(root, planPath, task, evidence, inScope) {
   const planRelative = relativePlan(root, planPath);
-  const paths = [...new Set([...audit.inScope, planRelative])];
+  const paths = [...new Set([...inScope, planRelative])];
   if (paths.length === 0) throw new AirlockError(`task ${task.id} has no changes to commit`);
-  git(root, ["add", "--", ...paths]);
-  git(root, ["commit", "-m", `${task.id}: ${task.title}`, "-m", `Airlock-Task: ${task.id}`, "-m", `Evidence: ${evidence}`]);
+  git(root, ["add", "--", planRelative]);
+  git(root, ["commit", "-m", `${task.id}: ${task.title}`, "-m", `Airlock-Task: ${task.id}`, "-m", `Evidence: ${evidence}`, "--", ...paths]);
   return git(root, ["rev-parse", "HEAD"]).trim();
 }
 
@@ -602,6 +628,13 @@ async function bootstrapOpenCode(root) {
   return created;
 }
 
+function parseReviewLines(raw) {
+  if (raw === undefined) return null;
+  const value = typeof raw === "string" && /^[+-]?\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < 1) throw new AirlockError("budget.reviewLines must be a positive integer");
+  return value;
+}
+
 async function initPlan(root, planPath, goal, flags) {
   const existing = existsSync(planPath);
   if (existing && flags.host !== "opencode") throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
@@ -611,6 +644,7 @@ async function initPlan(root, planPath, goal, flags) {
   } else {
     const done = String(flags.done ?? "").split("|").map((item) => item.trim()).filter(Boolean);
     if (done.length === 0) throw new AirlockError("init requires at least one testable done criterion via --done \"criterion|criterion\"");
+    const reviewLines = parseReviewLines(flags["review-lines"]);
     await mkdir(path.dirname(planPath), { recursive: true });
     plan = {
       schema: SCHEMA,
@@ -618,7 +652,7 @@ async function initPlan(root, planPath, goal, flags) {
       done,
       nonGoals: [],
       created: commandNow(),
-      budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2) },
+      budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2), ...(reviewLines === null ? {} : { reviewLines }) },
       tasks: [],
       decisions: [],
     };
@@ -659,7 +693,10 @@ async function main(argv = process.argv.slice(2)) {
     if (flags.unattended && result.parked?.length) throw new AirlockError(`PARKED: ${result.parked.map((item) => item.id).join(", ")}`, 2);
     return output({ text: result.text, task: result.selected?.task?.id ?? null, agent: result.selected ? taskAgent(result.selected.task) : null }, flags.json);
   }
-  if (command === "status") return output({ text: statusText(plan), plan }, flags.json);
+  if (command === "status") {
+    const review = reviewState(plan);
+    return output({ text: statusText(plan), plan, ...(review ? { review } : {}) }, flags.json);
+  }
   if (command === "render") return output({ text: flags.md ? renderMarkdown(plan) : statusText(plan) }, flags.json);
   if (command === "start") {
     const task = taskById(plan, requireValue(positional[0], "task id"));
@@ -702,6 +739,8 @@ async function main(argv = process.argv.slice(2)) {
     const audit = auditTask(root, planPath, task, undefined, plan);
     if (audit.outOfScope.length) throw new AirlockError(`audit failed; out-of-scope paths: ${audit.outOfScope.join(", ")}`);
     const original = readFileSync(planPath, "utf8");
+    if (audit.inScope.length) git(root, ["add", "--", ...audit.inScope]);
+    task.diffLines = stagedDiffLines(root, audit.inScope);
     task.status = "done";
     task.evidence.push(evidence);
     task.finishedAt = commandNow();
@@ -709,13 +748,18 @@ async function main(argv = process.argv.slice(2)) {
     writePlan(planPath, plan);
     let commit;
     try {
-      commit = taskCommit(root, planPath, task, evidence, plan);
+      commit = commitTask(root, planPath, task, evidence, audit.inScope);
     } catch (error) {
       writeFileSync(planPath, original, "utf8");
       git(root, ["reset", "--", relativePlan(root, planPath)]);
       throw error;
     }
-    return output({ text: `DONE ${task.id} ${commit}`, task, commit }, flags.json);
+    const review = reviewState(plan);
+    if (review) {
+      process.stderr.write(`REVIEW ${review.used}/${review.budget} lines\n`);
+      if (review.exceeded) process.stderr.write("REVIEW BUDGET EXCEEDED: open the pull request now and start the next plan.\n");
+    }
+    return output({ text: `DONE ${task.id} ${commit}`, task, commit, ...(review ? { review } : {}) }, flags.json);
   }
   if (command === "block") {
     const task = taskById(plan, requireValue(positional[0], "task id"));

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import { ownsPath, upgradePlan, validatePlan } from "./airlock.mjs";
 const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "airlock.mjs");
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGED_31_SHIM_HASH = "9201872f0c11c80d2a76b90bd14afc911943f7cf2923bd4212798a07eaba6e8e";
+const PACKAGED_400_SHIM_HASH = "4b4d5b3a87bca1afd8b8bdcd2c1acc35960d62ac0d200c0373e881782fc792ca";
 
 function task(id, overrides = {}) {
   return { id, title: id, role: "builder", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null, ...overrides };
@@ -65,6 +67,23 @@ async function writePlanFile(root, plan) {
 
 function contentHash(value) {
   return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
+}
+
+function commitNumstatTotal(root, sha, exclude = "airlock.plan.json") {
+  return execFileSync("git", ["-C", root, "show", "--numstat", "--format=", sha], { encoding: "utf8" })
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .reduce((sum, line) => {
+      const [added, deleted, file] = line.split("\t");
+      if (file === exclude || added === "-" || deleted === "-") return sum;
+      return sum + Number(added) + Number(deleted);
+    }, 0);
+}
+
+function commitSha(stdout) {
+  const sha = stdout.split(/\r?\n/)[0].split(" ")[2];
+  assert.match(sha ?? "", /^[0-9a-f]{40}$/);
+  return sha;
 }
 
 test("owns supports exact paths, directories, and globs", () => {
@@ -269,13 +288,15 @@ test("OpenCode bootstrap auto-upgrades only unmodified packaged command shims", 
   const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
   const packaged31 = await readFile(path.join(fixtures, "opencode-command-3.1.0-packaged.md"), "utf8");
   assert.equal(contentHash(packaged31), PACKAGED_31_SHIM_HASH, "fixture must hold the real packaged 3.1 shim bytes");
-  for (const legacy of ["opencode-command-3.1.0.md", "opencode-command-3.1.0-fallback.md", "opencode-command-3.1.0-packaged.md"]) {
+  const packaged400 = await readFile(path.join(fixtures, "opencode-command-4.0.0-packaged.md"), "utf8");
+  assert.equal(contentHash(packaged400), PACKAGED_400_SHIM_HASH, "fixture must hold the real packaged 4.0.0 shim bytes");
+  for (const legacy of ["opencode-command-3.1.0.md", "opencode-command-3.1.0-fallback.md", "opencode-command-3.1.0-packaged.md", "opencode-command-4.0.0-packaged.md"]) {
     await writeFile(commandPath, await readFile(path.join(fixtures, legacy), "utf8"));
     const upgraded = run(root, ["init", "--host", "opencode"]);
     assert.equal(upgraded.status, 0, upgraded.stderr);
     const content = await readFile(commandPath, "utf8");
     assert.match(content, /AGENT airlock-/, legacy);
-    assert.match(content, /airlock#v4\.0\.0/, legacy);
+    assert.match(content, /airlock#v4\.0\.1/, legacy);
     assert.doesNotMatch(content, /--host/, legacy);
   }
 
@@ -527,6 +548,181 @@ test("parallel tasks with disjoint glob prefixes may start together", async (t) 
   assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
 });
 
+test("schema governs the advisory review budget and recorded diff lines", () => {
+  const withReviewLines = (value) => {
+    const plan = basePlan([task("T1")]);
+    plan.budget.reviewLines = value;
+    return plan;
+  };
+  assert.doesNotThrow(() => validatePlan(basePlan([task("T1")])), "reviewLines is optional");
+  assert.doesNotThrow(() => validatePlan(withReviewLines(600)));
+  assert.doesNotThrow(() => validatePlan(withReviewLines(1)));
+  for (const value of [0, -1, 1.5, "600", null, true]) {
+    assert.throws(() => validatePlan(withReviewLines(value)), /^Error: budget\.reviewLines must be a positive integer$/, JSON.stringify(value));
+  }
+  assert.doesNotThrow(() => validatePlan(basePlan([task("T1", { diffLines: 0 })])));
+  assert.doesNotThrow(() => validatePlan(basePlan([task("T1", { diffLines: 612 })])));
+  for (const value of [-1, 1.5, "12", null, true]) {
+    assert.throws(() => validatePlan(basePlan([task("T1", { diffLines: value })])), /^Error: task T1 diffLines must be a non-negative integer$/, JSON.stringify(value));
+  }
+});
+
+test("init --review-lines writes a validated budget, omits it when absent, and rejects bad values before writing", async (t) => {
+  const root = await bareProject(t);
+  const withBudget = run(root, ["init", "A delivery", "--done", "test passes", "--review-lines", "600", "--plan", "with.plan.json"]);
+  assert.equal(withBudget.status, 0, withBudget.stderr);
+  assert.equal(JSON.parse(await readFile(path.join(root, "with.plan.json"), "utf8")).budget.reviewLines, 600);
+  const without = run(root, ["init", "A delivery", "--done", "test passes", "--plan", "without.plan.json"]);
+  assert.equal(without.status, 0, without.stderr);
+  const plainBudget = JSON.parse(await readFile(path.join(root, "without.plan.json"), "utf8")).budget;
+  assert.deepEqual(plainBudget, { maxTasks: 8, maxExpensive: 2 });
+  assert.equal("reviewLines" in plainBudget, false);
+  const rejected = [["--review-lines", "0"], ["--review-lines", "-5"], ["--review-lines", "abc"], ["--review-lines", "1.5"], ["--review-lines"]];
+  for (const [index, extra] of rejected.entries()) {
+    const target = `bad-${index}.plan.json`;
+    const result = run(root, ["init", "A delivery", "--done", "test passes", "--plan", target, ...extra]);
+    assert.equal(result.status, 1, extra.join(" "));
+    assert.match(result.stderr, /budget\.reviewLines must be a positive integer/, extra.join(" "));
+    assert.equal(existsSync(path.join(root, target)), false, `${extra.join(" ")} must not write a plan`);
+  }
+});
+
+test("done records diffLines equal to its own commit numstat across add, edit, and delete", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Reshape src", owns: ["src/"], acceptance: "node --test passes" })]));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "keep.js"), "1\n2\n3\n");
+  await writeFile(path.join(root, "src", "remove.js"), "a\nb\n");
+  execFileSync("git", ["-C", root, "add", "src"]);
+  execFileSync("git", ["-C", root, "commit", "-m", "seed"]);
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await writeFile(path.join(root, "src", "keep.js"), "1\n2\n3\n4\n");
+  await writeFile(path.join(root, "src", "new.js"), "x\ny\n");
+  await rm(path.join(root, "src", "remove.js"));
+  const done = run(root, ["done", "T1", "--evidence", "node --test: pass"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  const recorded = (await readPlanFile(root)).tasks[0].diffLines;
+  assert.equal(recorded, 5, "1 added on keep.js, 2 added on new.js, 2 deleted on remove.js");
+  assert.equal(recorded, commitNumstatTotal(root, sha), "diffLines must match the task commit numstat without the plan row");
+  const names = execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" });
+  assert.match(names, /src\/new\.js/);
+  assert.match(names, /airlock\.plan\.json/);
+});
+
+test("done counts a binary file as zero review lines", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Ship an asset", owns: ["assets/"], acceptance: "asset exists" })]));
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await mkdir(path.join(root, "assets"), { recursive: true });
+  await writeFile(path.join(root, "assets", "blob.bin"), Buffer.from([0, 1, 2, 0, 255, 0, 7, 0]));
+  await writeFile(path.join(root, "assets", "notes.txt"), "one\ntwo\n");
+  const done = run(root, ["done", "T1", "--evidence", "asset exists"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  assert.match(execFileSync("git", ["-C", root, "show", "--numstat", "--format=", sha], { encoding: "utf8" }), /^-\t-\tassets\/blob\.bin$/m);
+  const recorded = (await readPlanFile(root)).tasks[0].diffLines;
+  assert.equal(recorded, 2, "only the text file contributes");
+  assert.equal(recorded, commitNumstatTotal(root, sha));
+});
+
+test("done on a parallel task with an empty in-scope set records zero and commits only the plan", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "A", owns: ["a/"] }), task("T2", { title: "B", owns: ["b/"] })]));
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  assert.equal(run(root, ["start", "T2", "--parallel"]).status, 0);
+  await mkdir(path.join(root, "a"), { recursive: true });
+  await writeFile(path.join(root, "a", "f.js"), "1\n2\n3\n4\n5\n");
+  execFileSync("git", ["-C", root, "add", "--", "a/f.js"]);
+  const done = run(root, ["done", "T2", "--evidence", "no owned change was needed"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  assert.equal((await readPlanFile(root)).tasks[1].diffLines, 0, "an empty pathspec must not measure another lane");
+  const names = execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
+  assert.deepEqual(names, ["airlock.plan.json"]);
+  assert.match(execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }), /^A {2}a\/f\.js$/m);
+});
+
+test("done reports the review advisory on stderr and in --json when a budget is set", async (t) => {
+  const plan = basePlan([task("T1", { owns: ["src/T1.js"] }), task("T2", { owns: ["src/T2.js"] })]);
+  plan.budget.reviewLines = 2;
+  const root = await project(t, plan);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await writeFile(path.join(root, "src", "T1.js"), "1\n2\n");
+  const atBudget = run(root, ["done", "T1", "--evidence", "pass"]);
+  assert.equal(atBudget.status, 0, atBudget.stderr);
+  assert.match(atBudget.stdout.split(/\r?\n/)[0], /^DONE T1 [0-9a-f]{40}$/);
+  assert.equal(atBudget.stderr, "REVIEW 2/2 lines\n", "used == budget is not exceeded");
+  assert.equal(run(root, ["start", "T2"]).status, 0);
+  await writeFile(path.join(root, "src", "T2.js"), "1\n2\n3\n4\n5\n");
+  const overBudget = run(root, ["done", "T2", "--evidence", "pass", "--json"]);
+  assert.equal(overBudget.status, 0, overBudget.stderr);
+  assert.equal(overBudget.stderr, "REVIEW 7/2 lines\nREVIEW BUDGET EXCEEDED: open the pull request now and start the next plan.\n");
+  const json = JSON.parse(overBudget.stdout);
+  assert.match(json.text.split("\n")[0], /^DONE T2 [0-9a-f]{40}$/);
+  assert.deepEqual(json.review, { used: 7, budget: 2, exceeded: true });
+  assert.equal(json.task.diffLines, 5);
+});
+
+test("done stays silent on stderr and omits review from --json without a budget", async (t) => {
+  const root = await project(t, basePlan([task("T1", { owns: ["src/T1.js"] }), task("T2", { owns: ["src/T2.js"] })]));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await writeFile(path.join(root, "src", "T1.js"), "1\n2\n");
+  const plain = run(root, ["done", "T1", "--evidence", "pass"]);
+  assert.equal(plain.status, 0, plain.stderr);
+  assert.equal(plain.stderr, "");
+  assert.match(plain.stdout.split(/\r?\n/)[0], /^DONE T1 [0-9a-f]{40}$/);
+  assert.equal(run(root, ["start", "T2"]).status, 0);
+  await writeFile(path.join(root, "src", "T2.js"), "1\n");
+  const json = run(root, ["done", "T2", "--evidence", "pass", "--json"]);
+  assert.equal(json.status, 0, json.stderr);
+  assert.equal(json.stderr, "");
+  assert.equal("review" in JSON.parse(json.stdout), false);
+});
+
+test("an exceeded review budget never blocks dispatch and never emits BUDGET", async (t) => {
+  const plan = basePlan([task("T1", { status: "done", evidence: ["pass"], diffLines: 900 }), task("T2")]);
+  plan.budget.reviewLines = 600;
+  const root = await project(t, plan);
+  const next = run(root, ["next"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.match(next.stdout, /TASK T2 · builder/);
+  assert.doesNotMatch(next.stdout, /BUDGET|REVIEW/);
+  const status = run(root, ["status"]);
+  assert.equal(status.status, 0, status.stderr);
+  const lines = status.stdout.split(/\r?\n/);
+  assert.match(lines[0], /^GOAL {2}/);
+  assert.equal(lines[1], "REVIEW  900/600 lines (exceeded)");
+  assert.doesNotMatch(status.stdout, /BUDGET/);
+  assert.deepEqual(JSON.parse(run(root, ["status", "--json"]).stdout).review, { used: 900, budget: 600, exceeded: true });
+
+  plan.tasks[0].diffLines = 600;
+  await writePlanFile(root, plan);
+  assert.equal(run(root, ["status"]).stdout.split(/\r?\n/)[1], "REVIEW  600/600 lines");
+});
+
+test("a plan without review fields keeps its old shapes and missing diffLines count zero", async (t) => {
+  const root = await project(t, basePlan([
+    task("T1", { status: "done", evidence: ["pass"], owns: ["src/T1.js"] }),
+    task("T2", { owns: ["src/T2.js"] }),
+  ]));
+  const status = run(root, ["status"]);
+  assert.equal(status.status, 0, status.stderr);
+  assert.doesNotMatch(status.stdout, /REVIEW/);
+  assert.equal("review" in JSON.parse(run(root, ["status", "--json"]).stdout), false);
+  assert.equal(run(root, ["start", "T2"]).status, 0);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "T2.js"), "1\n2\n3\n");
+  const done = run(root, ["done", "T2", "--evidence", "pass"]);
+  assert.equal(done.status, 0, done.stderr);
+  assert.equal(done.stderr, "");
+  const after = await readPlanFile(root);
+  assert.equal(after.tasks[1].diffLines, 3);
+  assert.equal("diffLines" in after.tasks[0], false);
+  after.budget.reviewLines = 10;
+  await writePlanFile(root, after);
+  assert.equal(run(root, ["status"]).stdout.split(/\r?\n/)[1], "REVIEW  3/10 lines", "a done task without diffLines counts 0");
+});
+
 test("prompt surface contains only the slim roles and two shims", async () => {
   const root = packageRoot;
   const files = [
@@ -555,17 +751,17 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     assert.doesNotMatch(text, /--host/);
   }
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
-  assert.equal(packageJson.version, "4.0.0");
+  assert.equal(packageJson.version, "4.0.1");
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
   assert.ok(packageJson.files.includes("scripts/airlock.mjs"));
   assert.ok(packageJson.files.includes("roles"));
   assert.ok(packageJson.files.includes(".opencode/command/airlock.md"));
   const openCodeShim = await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8");
-  assert.match(openCodeShim, /npm install --global github:ivan-tretyakov\/airlock#v4\.0\.0/);
-  assert.doesNotMatch(openCodeShim, /#v3\.0\.0|#v3\.1\.0/);
+  assert.match(openCodeShim, /npm install --global github:ivan-tretyakov\/airlock#v4\.0\.1/);
+  assert.doesNotMatch(openCodeShim, /#v3\.0\.0|#v3\.1\.0|#v4\.0\.0/);
   const plugin = JSON.parse(await readFile(path.join(root, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(plugin.version, "4.0.0");
+  assert.equal(plugin.version, "4.0.1");
   assert.deepEqual(plugin.agents, ["./roles/builder.md", "./roles/checker.md", "./roles/browser.md"]);
   const marketplace = JSON.parse(await readFile(path.join(root, ".claude-plugin", "marketplace.json"), "utf8"));
-  assert.equal(marketplace.plugins[0].version, "4.0.0");
+  assert.equal(marketplace.plugins[0].version, "4.0.1");
 });
