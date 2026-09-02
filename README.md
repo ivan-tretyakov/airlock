@@ -147,7 +147,7 @@ The host surface is one command each: `commands/airlock.md` and `.opencode/comma
 
 ## Extensions
 
-Extensions are optional adapters that use the Airlock CLI without changing hosts or the prompt surface. One extension is available: a [Herdr](https://herdr.dev/) adapter that dispatches the `opencode` host's tasks into persistent Herdr panes. The Herdr adapter targets the 3.x CLI surface and requires Airlock 3.x (`v3.1.x` tag); it has not been ported to 4.0. See `docs/airlock/specs/2026-08-31-airlock-herdr-adapter.md` and `extensions/herdr/`.
+Extensions are optional adapters that use the Airlock CLI without changing hosts or the prompt surface. One extension is available: the [Herdr](https://herdr.dev/) router in `extensions/herdr/`, a Herdr plugin that runs one plan across several agent CLIs. It reads each task's role and `expensive` tier from the plan, looks the pair up in its own `routing.json`, and starts the chosen executor (`claude`, `codex`, or `opencode`) in a persistent Herdr pane. Airlock keeps every authority it has: validation, scheduling, the ownership audit, and the commit. The router owns only what 4.0 removed, namely executor and model selection, peak-time windows, route pinning, and fallback chains. It requires Airlock 4.0 or newer and installs into Herdr, not into Airlock; its configuration lives in the Herdr plugin config directory. See `docs/airlock/specs/2026-09-01-airlock-herdr-router.md`.
 
 ## Validation
 
@@ -169,7 +169,7 @@ Plans upgrade automatically: `readPlan` accepts `airlock.plan/v3`, maps `risk: "
 
 The 3.x routing artifacts are obsolete and ignored; you may delete them by hand: user and project `models.json`, `router-state.json`, and generated `airlock-<role>-<model>-<effort>` agents in `~/.claude/agents/` and the OpenCode user config directory. Per-role model preferences move into host agent files: edit `.opencode/agent/airlock-<role>.md` on OpenCode, or create a Claude override agent as described in Hosts.
 
-The Herdr adapter requires Airlock 3.x (`v3.1.x` tag).
+The 3.x Herdr adapter was never released; the Herdr router in `extensions/herdr/` replaces it and requires Airlock 4.0 or newer. Convert an existing `models.json` into the router's own `routing.json` with `airlock-herdr import-routes`; the router reads no Airlock configuration.
 
 ### From 2.x
 

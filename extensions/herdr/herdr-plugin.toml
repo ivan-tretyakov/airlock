@@ -1,0 +1,31 @@
+id = "airlock.herdr"
+name = "Airlock Herdr Router"
+version = "0.2.0"
+min_herdr_version = "0.8.2"
+platforms = ["linux"]
+
+[[actions]]
+id = "dispatch"
+title = "Dispatch next Airlock task"
+command = ["node", "bin/airlock-herdr.mjs", "dispatch"]
+
+[[actions]]
+id = "reconcile"
+title = "Reconcile Airlock task"
+command = ["node", "bin/airlock-herdr.mjs", "reconcile"]
+
+[[actions]]
+id = "status"
+title = "Show Airlock and Herdr status"
+command = ["node", "bin/airlock-herdr.mjs", "status"]
+
+[[actions]]
+id = "import-routes"
+title = "Convert a 3.x models.json to routing.json"
+command = ["node", "bin/airlock-herdr.mjs", "import-routes"]
+
+[[panes]]
+id = "status"
+title = "Airlock status"
+placement = "tab"
+command = ["node", "bin/airlock-herdr.mjs", "watch"]

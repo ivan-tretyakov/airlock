@@ -1,0 +1,94 @@
+{
+  "version": 3,
+  "catalog": {
+    "opencode": {
+      "zai-coding-plan/glm-5.3-flash": { "variants": ["max", "high", "medium"] },
+      "command-code/z-ai/glm-5.3-flash": { "variants": ["max"] },
+      "openrouter/z-ai/glm-5.3-flash": { "variants": ["max", "high"] },
+      "openai/gpt-5.6-sol": { "variants": ["medium", "high"] },
+      "openai/gpt-5.6-terra": { "variants": ["medium"] }
+    }
+  },
+  "claude": {
+    "builder": {
+      "standard": { "model": "sonnet", "effort": "medium" },
+      "critical": { "model": "opus", "effort": "high" },
+      "light": { "model": "haiku", "effort": "low" },
+      "complex": { "model": "opus", "effort": "medium" }
+    },
+    "checker": {
+      "standard": { "model": "sonnet", "effort": "medium" },
+      "critical": { "model": "opus", "effort": "high" },
+      "light": { "model": "haiku", "effort": "low" },
+      "complex": { "model": "sonnet", "effort": "high" }
+    },
+    "browser": {
+      "standard": { "model": "sonnet", "effort": "medium" },
+      "critical": { "model": "sonnet", "effort": "high" },
+      "light": { "model": "haiku", "effort": "low" },
+      "complex": { "model": "sonnet", "effort": "high" }
+    }
+  },
+  "opencode": {
+    "builder": {
+      "standard": {
+        "model": "zai-coding-plan/glm-5.3-flash",
+        "effort": "max",
+        "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3-flash", "effort": "max" }],
+        "windows": [
+          {
+            "name": "weekday-peak",
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+            "utc": "06:00-10:00",
+            "model": "command-code/z-ai/glm-5.3-flash",
+            "effort": "max",
+            "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3-flash", "effort": "max" }]
+          }
+        ]
+      },
+      "critical": { "model": "openai/gpt-5.6-sol", "effort": "medium" },
+      "light": {
+        "model": "zai-coding-plan/glm-5.3-flash",
+        "effort": "high",
+        "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3-flash", "effort": "high" }],
+        "windows": [
+          {
+            "name": "weekday-peak",
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+            "utc": "06:00-10:00",
+            "model": "zai-coding-plan/glm-5.3-flash",
+            "effort": "high",
+            "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3-flash", "effort": "high" }]
+          }
+        ]
+      },
+      "complex": {
+        "model": "zai-coding-plan/glm-5.3",
+        "effort": "high",
+        "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3", "effort": "high" }],
+        "windows": [
+          {
+            "name": "weekday-peak",
+            "days": ["mon", "tue", "wed", "thu", "fri"],
+            "utc": "06:00-10:00",
+            "model": "command-code/zai-org/glm-5.3",
+            "effort": "high",
+            "fallbacks": [{ "model": "openrouter/z-ai/glm-5.3", "effort": "high" }]
+          }
+        ]
+      }
+    },
+    "checker": {
+      "standard": { "model": "openai/gpt-5.6-terra", "effort": "medium" },
+      "critical": { "model": "openai/gpt-5.6-sol", "effort": "high" },
+      "light": { "model": "zai-coding-plan/glm-5.3-flash", "effort": "medium" },
+      "complex": { "model": "openai/gpt-5.6-terra", "effort": "medium" }
+    },
+    "browser": {
+      "standard": { "model": "openai/gpt-5.6-luna", "effort": "medium" },
+      "critical": { "model": "openai/gpt-5.6-terra", "effort": "medium" },
+      "light": { "model": "openai/gpt-5.6-luna", "effort": "medium" },
+      "complex": { "model": "openai/gpt-5.6-luna", "effort": "high" }
+    }
+  }
+}
