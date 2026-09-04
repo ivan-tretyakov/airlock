@@ -105,7 +105,11 @@ Bugs and questions are not plan items. File bugs in the issue tracker with the e
 
 ## Commands
 
-Coordinator verbs: `next`, `start`, `done`, `block`, `ask`, `answer`, `status`, `audit`.
+Coordinator verbs: `next`, `start`, `run`, `done`, `block`, `ask`, `answer`, `status`, `audit`.
+
+`airlock run` executes the next runnable task end to end: it resolves the worker from routing, spawns the executor CLI headless with the role body plus the task brief as its prompt, waits for exit, parses one `EVIDENCE:` line from the worker's final message, then runs `audit` and `done --evidence` on `PASS` or `block --reason` on `FAIL`. One invocation runs one task so a driving session can steer between tasks; `--all` loops until nothing is runnable, one worker at a time. Any executor failure — non-zero exit, missing binary, or timeout — blocks the task with the cause and stops the run; nothing retries and nothing falls back. A worker whose final line does not read `EVIDENCE: PASS ...` or `EVIDENCE: FAIL ...` blocks with `worker returned no EVIDENCE line`. `--dry-run` prints the resolved executor command line and prompt length without launching anything. `run` stops with the same texts and exit codes the other verbs produce: `PARKED` (exit 2), `NOTHING TO DO`, `BUDGET REACHED`.
+
+Routing lives in `~/.airlock/routing.json` (override with `--routing <path>`), schema version 1: `bindings.<role>.<tier>` for each role (`builder`, `checker`, `browser`) and tier (`default`, `expensive` — `expensive` when the task says `expensive: true`), each slot exactly `{ "executor": "claude" | "codex" | "opencode", "model": "...", "effort": "..." }` with `effort` optional. Optional top-level `timeoutMinutes` defaults to 30. Unknown keys anywhere are rejected, and a missing slot for the selected role and tier fails closed with the JSON path named. Executors run with the repository root as their working directory, the prompt on stdin, and the inherited environment minus `CLAUDE_CODE_SUBAGENT_MODEL`: `claude --print --model <m> [--effort <e>] --permission-mode bypassPermissions`, `codex exec -m <m> [-c model_reasoning_effort=<e>] --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message <file>`, `opencode run -m <m> [--variant <e>] --auto`.
 
 Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`.
 

@@ -86,6 +86,76 @@ function commitSha(stdout) {
   return sha;
 }
 
+function canonicalRouting() {
+  return {
+    bindings: {
+      builder: {
+        default: { executor: "opencode", model: "zai-coding-plan/glm-5.3", effort: "high" },
+        expensive: { executor: "claude", model: "opus", effort: "high" },
+      },
+      checker: {
+        default: { executor: "codex", model: "gpt-5.6-sol", effort: "medium" },
+        expensive: { executor: "codex", model: "gpt-5.6-sol", effort: "high" },
+      },
+      browser: {
+        default: { executor: "codex", model: "gpt-5.6-sol", effort: "medium" },
+        expensive: { executor: "claude", model: "opus", effort: "high" },
+      },
+    },
+  };
+}
+
+async function fakeExecutors(t) {
+  const dir = await mkdtemp(path.join(tmpdir(), "airlock-bin-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fake = path.join(dir, "executor.mjs");
+  await writeFile(fake, [
+    'import { mkdirSync, writeFileSync } from "node:fs";',
+    'import { tmpdir } from "node:os";',
+    'import path from "node:path";',
+    'let input = "";',
+    'process.stdin.setEncoding("utf8");',
+    'process.stdin.on("data", (chunk) => { input += chunk; });',
+    'process.stdin.on("end", () => {',
+    "  const argv = process.argv.slice(2);",
+    "  writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ argv, stdin: input }));",
+    '  const owned = input.match(/^OWNS  (.+)$/m);',
+    '  if (owned) { mkdirSync(path.dirname(path.resolve(owned[1])), { recursive: true }); writeFileSync(path.resolve(owned[1]), "built\\n"); }',
+    '  if (process.env.FAKE_STRAY) writeFileSync(path.resolve(process.env.FAKE_STRAY), "stray\\n");',
+    '  const last = argv.indexOf("--output-last-message");',
+    '  if (last !== -1) writeFileSync(argv[last + 1], process.env.FAKE_MESSAGE);',
+    '  const sleep = Number(process.env.FAKE_SLEEP ?? 0);',
+    "  setTimeout(() => {",
+    "    process.stdout.write(process.env.FAKE_MESSAGE);",
+    "    process.exit(Number(process.env.FAKE_EXIT ?? 0));",
+    "  }, sleep);",
+    '  if (sleep) process.chdir(tmpdir());',
+    "});",
+  ].join("\n"));
+  for (const name of ["claude", "codex", "opencode"]) {
+    if (process.platform === "win32") await writeFile(path.join(dir, `${name}.cmd`), `@node "${fake}" %*\r\n`);
+    else await writeFile(path.join(dir, name), `#!/bin/sh\nexec node "${fake}" "$@"\n`, { mode: 0o755 });
+  }
+  return { dir, record: path.join(dir, "record.json") };
+}
+
+function runBin(root, args, bin, behavior = {}) {
+  return run(root, args, {
+    PATH: `${bin.dir}${path.delimiter}${process.env.PATH}`,
+    FAKE_RECORD: bin.record,
+    FAKE_MESSAGE: behavior.message ?? "EVIDENCE: PASS npm test: pass",
+    ...(behavior.exit !== undefined ? { FAKE_EXIT: String(behavior.exit) } : {}),
+    ...(behavior.sleep !== undefined ? { FAKE_SLEEP: String(behavior.sleep) } : {}),
+    ...(behavior.stray !== undefined ? { FAKE_STRAY: behavior.stray } : {}),
+  });
+}
+
+async function writeRoutingFile(bin, routing) {
+  const routingPath = path.join(bin.dir, "routing.json");
+  await writeFile(routingPath, `${JSON.stringify(routing, null, 2)}\n`);
+  return routingPath;
+}
+
 test("owns supports exact paths, directories, and globs", () => {
   assert.equal(ownsPath(["src/a.js"], "src/a.js"), true);
   assert.equal(ownsPath(["src/"], "src/nested/a.js"), true);
@@ -741,7 +811,7 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     assert.ok(size <= 800, `${role}.md is ${size} bytes; ceiling is 800`);
     assert.match(text, new RegExp(`^name: airlock-${role}$`, "m"));
   }
-  for (const command of ["commands/airlock.md", ".opencode/command/airlock.md"]) {
+  for (const command of [".opencode/command/airlock.md"]) {
     const text = await readFile(path.join(root, command), "utf8");
     assert.match(text, /unattended/);
     assert.match(text, /AGENT airlock-/);
@@ -750,6 +820,10 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     assert.doesNotMatch(text, /Never fallback after any child result/);
     assert.doesNotMatch(text, /--host/);
   }
+  const claudeCommand = await readFile(path.join(root, "commands", "airlock.md"), "utf8");
+  assert.match(claudeCommand, /airlock\.mjs" run/);
+  assert.doesNotMatch(claudeCommand, /AGENT airlock-/, "the runner command never dispatches a subagent");
+  assert.doesNotMatch(claudeCommand, /--host/);
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(packageJson.version, "4.0.1");
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
@@ -764,4 +838,238 @@ test("prompt surface contains only the slim roles and two shims", async () => {
   assert.deepEqual(plugin.agents, ["./roles/builder.md", "./roles/checker.md", "./roles/browser.md"]);
   const marketplace = JSON.parse(await readFile(path.join(root, ".claude-plugin", "marketplace.json"), "utf8"));
   assert.equal(marketplace.plugins[0].version, "4.0.1");
+});
+
+test("run routing validation rejects unknown keys and executors and names the missing slot", async (t) => {
+  const bin = await fakeExecutors(t);
+  const root = await project(t, basePlan([task("T1"), task("C1", { role: "checker", owns: ["docs/C1.md"] })]));
+
+  const top = canonicalRouting();
+  top.windows = [];
+  await writeRoutingFile(bin, top);
+  let result = runBin(root, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing has unknown key: windows/);
+
+  const unknownRole = canonicalRouting();
+  unknownRole.bindings.buidler = unknownRole.bindings.builder;
+  delete unknownRole.bindings.builder;
+  await writeRoutingFile(bin, unknownRole);
+  result = runBin(root, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing\.bindings has unknown key: buidler/);
+
+  const unknownTier = canonicalRouting();
+  unknownTier.bindings.builder.expensiv = unknownTier.bindings.builder.expensive;
+  delete unknownTier.bindings.builder.expensive;
+  await writeRoutingFile(bin, unknownTier);
+  result = runBin(root, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing\.bindings\.builder has unknown key: expensiv/);
+
+  const unknownExecutor = canonicalRouting();
+  unknownExecutor.bindings.builder.default = { executor: "cursor", model: "x" };
+  await writeRoutingFile(bin, unknownExecutor);
+  result = runBin(root, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing\.bindings\.builder\.default\.executor must be one of claude, codex, opencode/);
+
+  const unknownSlotKey = canonicalRouting();
+  unknownSlotKey.bindings.builder.default.pin = "opus";
+  await writeRoutingFile(bin, unknownSlotKey);
+  result = runBin(root, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing\.bindings\.builder\.default has unknown key: pin/);
+
+  const missingSlot = canonicalRouting();
+  delete missingSlot.bindings.checker;
+  await writeRoutingFile(bin, missingSlot);
+  const checkerRoot = await project(t, basePlan([task("C1", { role: "checker", owns: ["docs/C1.md"] })]));
+  result = runBin(checkerRoot, ["run", "--routing", path.join(bin.dir, "routing.json")], bin);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /routing\.bindings\.checker\.default is missing/);
+  assert.equal((await readPlanFile(checkerRoot)).tasks[0].status, "todo", "a missing slot must not start the task");
+});
+
+test("run passes each executor the expected flags for model and effort", async (t) => {
+  const cases = [
+    { slot: { executor: "claude", model: "opus", effort: "high" }, argv: ["--print", "--model", "opus", "--effort", "high", "--permission-mode", "bypassPermissions"] },
+    { slot: { executor: "claude", model: "claude-fable-5" }, argv: ["--print", "--model", "claude-fable-5", "--permission-mode", "bypassPermissions"] },
+    {
+      slot: { executor: "codex", model: "gpt-5.6-sol", effort: "medium" },
+      argv: ["exec", "-m", "gpt-5.6-sol", "-c", "model_reasoning_effort=medium", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--output-last-message", "<file>"],
+    },
+    { slot: { executor: "codex", model: "gpt-5.6-sol" }, argv: ["exec", "-m", "gpt-5.6-sol", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--output-last-message", "<file>"] },
+    { slot: { executor: "opencode", model: "zai-coding-plan/glm-5.3", effort: "high" }, argv: ["run", "-m", "zai-coding-plan/glm-5.3", "--variant", "high", "--auto"] },
+    { slot: { executor: "opencode", model: "zai-coding-plan/glm-5.3" }, argv: ["run", "-m", "zai-coding-plan/glm-5.3", "--auto"] },
+  ];
+  for (const { slot, argv } of cases) {
+    const root = await project(t, basePlan([task("T1")]));
+    const bin = await fakeExecutors(t);
+    const routing = canonicalRouting();
+    routing.bindings.builder.default = slot;
+    const routingPath = await writeRoutingFile(bin, routing);
+    const result = runBin(root, ["run", "--routing", routingPath], bin);
+    assert.equal(result.status, 0, `${JSON.stringify(slot)}: ${result.stderr}`);
+    assert.match(result.stdout, /^RAN T1 DONE [0-9a-f]{40}$/m);
+    const record = JSON.parse(await readFile(bin.record, "utf8"));
+    if (argv.at(-1) === "<file>") {
+      assert.deepEqual(record.argv.slice(0, -1), argv.slice(0, -1));
+      assert.equal(record.argv.length, argv.length);
+      assert.ok(typeof record.argv.at(-1) === "string" && record.argv.at(-1).length > 0, "codex carries a last-message file path");
+    } else {
+      assert.deepEqual(record.argv, argv);
+    }
+  }
+});
+
+test("run routes an expensive task to the expensive slot", async (t) => {
+  const root = await project(t, basePlan([task("T1", { expensive: true })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin);
+  assert.equal(result.status, 0, result.stderr);
+  const record = JSON.parse(await readFile(bin.record, "utf8"));
+  assert.deepEqual(record.argv, ["--print", "--model", "opus", "--effort", "high", "--permission-mode", "bypassPermissions"]);
+});
+
+test("the worker prompt is the role body plus the exact brief on stdin", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Serialize CSV", owns: ["src/T1.js"], acceptance: "node --test passes" })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin);
+  assert.equal(result.status, 0, result.stderr);
+  const { stdin } = JSON.parse(await readFile(bin.record, "utf8"));
+  const body = (await readFile(path.join(packageRoot, "roles", "builder.md"), "utf8")).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+  assert.ok(stdin.startsWith(body), "the prompt opens with the frontmatter-stripped role body");
+  assert.match(stdin, /\n\nTASK T1 · builder\n/);
+  assert.match(stdin, /GOAL  Airlock plan behavior is testable/);
+  assert.match(stdin, /DO    Serialize CSV/);
+  assert.match(stdin, /OWNS  src\/T1\.js/);
+  assert.match(stdin, /DONE  node --test passes/);
+  assert.match(stdin, /EVIDENCE: PASS <command and result>` or `EVIDENCE: FAIL <reason or findings path>/);
+  assert.match(stdin, /RULES Change only OWNS paths/);
+});
+
+test("a PASS worker yields an audited commit carrying the worker's evidence", async (t) => {
+  const root = await project(t, basePlan([task("T1", { owns: ["src/T1.js"], acceptance: "node --test passes" })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin, { message: "EVIDENCE: PASS npm test: 12 passing" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), result.stdout.match(/^RAN T1 DONE ([0-9a-f]{40})$/m)[0], "single mode prints exactly one result line");
+  const sha = result.stdout.match(/^RAN T1 DONE ([0-9a-f]{40})$/m)[1];
+  const message = execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" });
+  assert.match(message, /Airlock-Task: T1/);
+  assert.match(message, /Evidence: npm test: 12 passing/);
+  assert.match(execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }), /src\/T1\.js/);
+  assert.equal((await readPlanFile(root)).tasks[0].status, "done");
+});
+
+test("a FAIL worker blocks the task with the worker's reason", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin, { message: "EVIDENCE: FAIL findings at docs/review.md" });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^RAN T1 BLOCKED findings at docs\/review\.md$/m);
+  const plan = await readPlanFile(root);
+  assert.equal(plan.tasks[0].status, "blocked");
+  assert.match(plan.tasks[0].note, /findings at docs\/review\.md/);
+});
+
+test("a worker without an EVIDENCE line blocks", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin, { message: "Everything looks fine, ship it." });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^RAN T1 BLOCKED worker returned no EVIDENCE line$/m);
+  assert.match((await readPlanFile(root)).tasks[0].note, /worker returned no EVIDENCE line/);
+});
+
+test("a non-zero executor exit blocks and --all stops after it", async (t) => {
+  const root = await project(t, basePlan([task("T1"), task("T2")]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--all", "--routing", routingPath], bin, { exit: 7 });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^RAN T1 BLOCKED executor opencode exited 7$/m);
+  assert.equal(result.stdout.match(/^RAN /gm).length, 1, "the run stops after the failed worker");
+  const plan = await readPlanFile(root);
+  assert.equal(plan.tasks[0].status, "blocked");
+  assert.equal(plan.tasks[1].status, "todo");
+});
+
+test("an executor that exceeds timeoutMinutes blocks with a timeout reason", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const bin = await fakeExecutors(t);
+  const routing = canonicalRouting();
+  routing.timeoutMinutes = 0.02;
+  const routingPath = await writeRoutingFile(bin, routing);
+  const result = runBin(root, ["run", "--routing", routingPath], bin, { sleep: 4000 });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^RAN T1 BLOCKED executor opencode timed out after 0\.02 minutes$/m);
+  assert.equal((await readPlanFile(root)).tasks[0].status, "blocked");
+});
+
+test("an out-of-scope worker change blocks with the audit text", async (t) => {
+  const root = await project(t, basePlan([task("T1", { owns: ["src/T1.js"] })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--routing", routingPath], bin, { stray: "STRAY.md" });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^RAN T1 BLOCKED IN SCOPE\n  src\/T1\.js\nOUT OF SCOPE\n  STRAY\.md$/m);
+  assert.match((await readPlanFile(root)).tasks[0].note, /OUT OF SCOPE\n  STRAY\.md/);
+});
+
+test("--all completes a two-builder plan in dependency order and stops at NOTHING TO DO", async (t) => {
+  const root = await project(t, basePlan([task("T1"), task("T2", { dependsOn: ["T1"] })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--all", "--routing", routingPath], bin);
+  assert.equal(result.status, 0, result.stderr);
+  const lines = result.stdout.split(/\r?\n/);
+  assert.match(lines[0], /^RAN T1 DONE [0-9a-f]{40}$/);
+  assert.match(lines[1], /^RAN T2 DONE [0-9a-f]{40}$/);
+  assert.equal(lines[2], "NOTHING TO DO");
+  assert.equal(lines[3], "All tasks are done.");
+  const plan = await readPlanFile(root);
+  assert.equal(plan.tasks.every((item) => item.status === "done"), true);
+  const order = execFileSync("git", ["-C", root, "log", "--format=%B", "--reverse"], { encoding: "utf8" });
+  assert.match(order, /Airlock-Task: T1[\s\S]*Airlock-Task: T2/);
+});
+
+test("--dry-run resolves the command without launching anything", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--dry-run", "--routing", routingPath], bin);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^TASK T1 · builder · opencode\nCOMMAND opencode run -m zai-coding-plan\/glm-5\.3 --variant high --auto\nPROMPT \d+ characters\n$/);
+  assert.equal(existsSync(bin.record), false, "no executor may run");
+  assert.equal((await readPlanFile(root)).tasks[0].status, "todo", "dry-run must not call start");
+});
+
+test("run parks blocking decisions with exit 2 like next --unattended", async (t) => {
+  const root = await project(t, basePlan([task("T1")]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  assert.equal(run(root, ["ask", "T1", "Deploy", "--options", "yes|no", "--blocking", "--case", "external"]).status, 0);
+  const result = runBin(root, ["run", "--routing", routingPath], bin);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /PARKED: D1/);
+  assert.equal(existsSync(bin.record), false);
+});
+
+test("a passing checker completes the run cycle end to end", { skip: "needs the checker empty-commit rule from spec 1 (2026-09-04-airlock-5.0-plan-state.md); enable once it lands" }, async (t) => {
+  const root = await project(t, basePlan([task("T1"), task("C1", { role: "checker", owns: ["docs/C1.md"], dependsOn: ["T1"] })]));
+  const bin = await fakeExecutors(t);
+  const routingPath = await writeRoutingFile(bin, canonicalRouting());
+  const result = runBin(root, ["run", "--all", "--routing", routingPath], bin, { message: "EVIDENCE: PASS npm test: verified" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^RAN C1 DONE [0-9a-f]{40}$/m);
+  const sha = result.stdout.match(/^RAN C1 DONE ([0-9a-f]{40})$/m)[1];
+  assert.equal(execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }).trim(), "", "a reporting-only checker completes with an empty commit");
+  assert.match(execFileSync("git", ["-C", root, "log", "-1", "--format=%B", sha], { encoding: "utf8" }), /Airlock-Task: C1\nEvidence: npm test: verified/);
 });
