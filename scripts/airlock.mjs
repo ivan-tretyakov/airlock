@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -84,19 +84,28 @@ function findRoot(start = process.cwd()) {
   }
 }
 
+function planCandidates(root) {
+  return [
+    path.join(root, ".airlock", "plan.json"),
+    path.join(root, "airlock.plan.json"),
+    path.join(root, "docs", "airlock", "airlock.plan.json"),
+  ];
+}
+
 function findPlan(root, requested) {
   if (requested) {
     const candidate = path.resolve(requested);
     if (!existsSync(candidate)) throw new AirlockError(`plan not found: ${candidate}`);
     return candidate;
   }
-  const candidates = [
-    path.join(root, "airlock.plan.json"),
-    path.join(root, "docs", "airlock", "airlock.plan.json"),
-  ].filter(existsSync);
-  if (candidates.length === 0) throw new AirlockError("no airlock.plan.json found at the repository root or docs/airlock/");
+  const candidates = planCandidates(root).filter(existsSync);
+  if (candidates.length === 0) throw new AirlockError("no plan found at .airlock/plan.json, the repository root, or docs/airlock/");
   if (candidates.length > 1) throw new AirlockError("multiple plans found; select one with --plan <path>");
   return candidates[0];
+}
+
+function defaultInitPlanPath(root) {
+  return planCandidates(root).find(existsSync) ?? planCandidates(root)[0];
 }
 
 function readJson(filePath, label) {
@@ -523,12 +532,29 @@ function nextDecisionId(plan) {
   return `D${number}`;
 }
 
+function planIsTracked(root, planPath) {
+  try {
+    return git(root, ["ls-files", "--error-unmatch", "--", relativePlan(root, planPath)]).trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function commitTask(root, planPath, task, evidence, inScope) {
   const planRelative = relativePlan(root, planPath);
-  const paths = [...new Set([...inScope, planRelative])];
-  if (paths.length === 0) throw new AirlockError(`task ${task.id} has no changes to commit`);
-  git(root, ["add", "--", planRelative]);
-  git(root, ["commit", "-m", `${task.id}: ${task.title}`, "-m", `Airlock-Task: ${task.id}`, "-m", `Evidence: ${evidence}`, "--", ...paths]);
+  const tracked = planIsTracked(root, planPath);
+  const paths = [...new Set([...inScope, ...(tracked ? [planRelative] : [])])];
+  if (tracked) git(root, ["add", "--", planRelative]);
+  const emptyCommit = paths.length === 0 && task.role === "checker";
+  if (paths.length === 0 && !emptyCommit) throw new AirlockError(`task ${task.id} has no changes to commit`);
+  git(root, [
+    "commit",
+    ...(emptyCommit ? ["--allow-empty", "--only"] : []),
+    "-m", `${task.id}: ${task.title}`,
+    "-m", `Airlock-Task: ${task.id}`,
+    "-m", `Evidence: ${evidence}`,
+    "--", ...paths,
+  ]);
   return git(root, ["rev-parse", "HEAD"]).trim();
 }
 
@@ -635,6 +661,19 @@ function parseReviewLines(raw) {
   return value;
 }
 
+function excludeAirlockDirectory(root) {
+  const excludePath = path.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).trim());
+  const current = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : "";
+  if (current.split(/\r?\n/).some((line) => line.trim() === ".airlock/")) return;
+  const prefix = current.length === 0 || current.endsWith("\n") ? current : `${current}\n`;
+  try {
+    mkdirSync(path.dirname(excludePath), { recursive: true });
+    writeFileSync(excludePath, `${prefix}.airlock/\n`, "utf8");
+  } catch (error) {
+    throw new AirlockError(`cannot write ${excludePath}: ${error.message}`);
+  }
+}
+
 async function initPlan(root, planPath, goal, flags) {
   const existing = existsSync(planPath);
   if (existing && flags.host !== "opencode") throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
@@ -661,8 +700,11 @@ async function initPlan(root, planPath, goal, flags) {
   }
   const bootstrap = flags.host === "opencode" ? await bootstrapOpenCode(root) : [];
   if (existsSync(path.join(root, ".git"))) {
-    const paths = [planPath, ...bootstrap].filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
-    git(root, ["add", "--", ...paths]);
+    excludeAirlockDirectory(root);
+    if (bootstrap.length) {
+      const paths = bootstrap.filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
+      git(root, ["add", "--", ...paths]);
+    }
   }
   return plan;
 }
@@ -681,7 +723,7 @@ async function main(argv = process.argv.slice(2)) {
   const root = findRoot();
   commandTimestamp = commandNow();
   if (command === "init") {
-    const planPath = flags.plan ? path.resolve(flags.plan) : path.join(root, "airlock.plan.json");
+    const planPath = flags.plan ? path.resolve(flags.plan) : defaultInitPlanPath(root);
     const plan = await initPlan(root, planPath, positional.join(" "), flags);
     return output({ text: `INITIALIZED ${planPath}`, plan }, flags.json);
   }

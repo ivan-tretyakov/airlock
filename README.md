@@ -14,7 +14,7 @@ Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The com
 
 ## Plan File
 
-`airlock.plan.json` is the only authored workflow artifact (`schema: "airlock.plan/v4"`). It holds the goal, testable done criteria, task contracts, decisions, evidence, and lifecycle state. Store it at the repository root or under `docs/airlock/`.
+`airlock.plan.json` is the only authored workflow artifact (`schema: "airlock.plan/v4"`). It holds the goal, testable done criteria, task contracts, decisions, evidence, and lifecycle state. `init` keeps it at `.airlock/plan.json`, excluded from git per clone through `.git/info/exclude`, so it never lands in a merge request and disappears with the worktree; the legacy locations, the repository root and `docs/airlock/`, keep working for a committed plan.
 
 Each task requires an id, role (`builder`, `checker`, or `browser`), at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance. A task may declare `expensive: true`; absent or `expensive: false` means not expensive, and any non-boolean value is rejected. `budget.maxExpensive` caps how many expensive tasks may run or complete. Tasks never carry a `risk` or `model` field: `risk` was removed in v4, and model choice belongs to the host agent files.
 
@@ -107,7 +107,7 @@ Bugs and questions are not plan items. File bugs in the issue tracker with the e
 
 Coordinator verbs: `next`, `start`, `done`, `block`, `ask`, `answer`, `status`, `audit`.
 
-Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`.
+Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`; it writes the plan to `.airlock/plan.json` (adding `.airlock/` to `.git/info/exclude`) unless `--plan` or an existing plan says otherwise, and the plan joins a task commit only when git already tracks it.
 
 All commands support `--json`; use `--plan <path>` when a repository has more than one delivery plan. `--host claude|opencode` is meaningful only on `init` (it selects the OpenCode bootstrap); on every other command it is accepted and ignored as a deprecated no-op, and the `AIRLOCK_HOST` environment variable is no longer read.
 
