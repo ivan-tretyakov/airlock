@@ -1,7 +1,7 @@
 {
   "name": "airlock",
-  "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
-  "version": "4.0.1",
+  "description": "Plan-driven multimodel task orchestration with headless executor dispatch.",
+  "version": "5.0.0",
   "author": {
     "name": "Ivan Tretyakov"
   },
@@ -13,15 +13,9 @@
     "process",
     "planning",
     "tdd",
-    "subagents",
     "scope-control",
     "code-review",
     "cowork",
     "opt-in"
-  ],
-  "agents": [
-    "./roles/builder.md",
-    "./roles/checker.md",
-    "./roles/browser.md"
   ]
 }

@@ -4,7 +4,7 @@ Airlock is optional. When this repository uses it, keep delivery state in one `a
 
 - Use repository-relative `owns` paths or globs only.
 - Each completed task must leave the product worktree clean through its Airlock task commit.
-- Configure browser MCP access and its refresh command in the project host configuration when browser tasks are used.
+- Configure browser MCP access and its refresh command in the executing tool's project configuration when browser tasks are used.
 
 ## Authoring tasks
 
