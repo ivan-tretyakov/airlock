@@ -65,6 +65,24 @@ async function writePlanFile(root, plan) {
   await writeFile(path.join(root, "airlock.plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
 }
 
+async function readAirlockPlan(root) {
+  return JSON.parse(await readFile(path.join(root, ".airlock", "plan.json"), "utf8"));
+}
+
+async function writeAirlockPlan(root, plan) {
+  await writeFile(path.join(root, ".airlock", "plan.json"), `${JSON.stringify(plan, null, 2)}\n`);
+}
+
+async function initRepo(t, goal = "A delivery") {
+  const root = await bareProject(t);
+  await writeFile(path.join(root, "baseline.txt"), "baseline\n");
+  execFileSync("git", ["-C", root, "add", "baseline.txt"]);
+  execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
+  const result = run(root, ["init", goal, "--done", "test passes"]);
+  assert.equal(result.status, 0, result.stderr);
+  return root;
+}
+
 function contentHash(value) {
   return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
 }
@@ -311,10 +329,10 @@ test("init state does not poison the first task boundary", async (t) => {
   execFileSync("git", ["-C", root, "add", "baseline.txt"]);
   execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
   assert.equal(run(root, ["init", "A delivery", "--done", "test passes"]).status, 0);
-  const plan = await readPlanFile(root);
+  const plan = await readAirlockPlan(root);
   assert.equal(plan.schema, "airlock.plan/v4");
   plan.tasks.push(task("T1", { title: "First task" }));
-  await writePlanFile(root, plan);
+  await writeAirlockPlan(root, plan);
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
@@ -576,10 +594,105 @@ test("goal-level blocking decisions do not require a task", async (t) => {
 test("unborn repositories use normal Airlock boundary behavior", async (t) => {
   const root = await bareProject(t);
   assert.equal(run(root, ["init", "A delivery", "--done", "test passes"]).status, 0);
-  const plan = await readPlanFile(root);
+  const plan = await readAirlockPlan(root);
   plan.tasks.push(task("T1", { title: "First" }));
-  await writePlanFile(root, plan);
+  await writeAirlockPlan(root, plan);
   assert.equal(run(root, ["start", "T1"]).status, 0);
+});
+
+test("init creates the plan under .airlock, excludes it once, and leaves a clean tree", async (t) => {
+  const root = await initRepo(t);
+  const plan = await readAirlockPlan(root);
+  assert.equal(plan.schema, "airlock.plan/v4");
+  assert.equal(plan.goal, "A delivery");
+  const exclude = await readFile(path.join(root, ".git", "info", "exclude"), "utf8");
+  assert.match(exclude, /^\.airlock\/$/m);
+  assert.equal(execFileSync("git", ["-C", root, "log", "--oneline"], { encoding: "utf8" }).trim().split(/\r?\n/).length, 1, "init must not commit");
+  assert.equal(execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }), "", "the excluded plan must leave the tree clean");
+  assert.equal(run(root, ["init", "Another delivery", "--done", "test passes", "--plan", "second/plan.json"]).status, 0);
+  const again = await readFile(path.join(root, ".git", "info", "exclude"), "utf8");
+  assert.equal(again.split(/\r?\n/).filter((line) => line.trim() === ".airlock/").length, 1);
+});
+
+test("a full next, start, done cycle commits product changes without the plan", async (t) => {
+  const root = await initRepo(t);
+  const plan = await readAirlockPlan(root);
+  plan.tasks.push(task("T1", { title: "Write owned feature", owns: ["src/feature.js"], acceptance: "node --test passes" }));
+  await writeAirlockPlan(root, plan);
+  const next = run(root, ["next"]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.match(next.stdout, /TASK T1 · builder/);
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n");
+  assert.equal(run(root, ["audit", "T1"]).status, 0);
+  const done = run(root, ["done", "T1", "--evidence", "node --test: pass"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  const names = execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
+  assert.deepEqual(names, ["src/feature.js"], "the task commit must not contain the plan");
+  assert.match(execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" }), /Airlock-Task: T1/);
+  assert.equal((await readAirlockPlan(root)).tasks[0].status, "done");
+  assert.equal(execFileSync("git", ["-C", root, "status", "--porcelain"], { encoding: "utf8" }), "");
+});
+
+test("a legacy plan committed at the root is still staged with the task commit", async (t) => {
+  const root = await project(t, basePlan([task("T1", { title: "Write owned feature", owns: ["src/feature.js"], acceptance: "node --test passes" })]));
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "src", "feature.js"), "export const feature = true;\n");
+  const done = run(root, ["done", "T1", "--evidence", "node --test: pass"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  const names = execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }).split(/\r?\n/).filter(Boolean);
+  assert.deepEqual(names.sort(), ["airlock.plan.json", "src/feature.js"]);
+});
+
+test("a checker with no changes completes through an empty commit with both trailers", async (t) => {
+  const root = await initRepo(t);
+  const plan = await readAirlockPlan(root);
+  plan.tasks.push(task("T1", { title: "Verify the delivery", role: "checker", owns: ["docs/verification.md"], acceptance: "npm test passes" }));
+  await writeAirlockPlan(root, plan);
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  const done = run(root, ["done", "T1", "--evidence", "npm test: pass"]);
+  assert.equal(done.status, 0, done.stderr);
+  const sha = commitSha(done.stdout);
+  assert.equal(execFileSync("git", ["-C", root, "show", "--numstat", "--format=", sha], { encoding: "utf8" }).trim(), "", "the commit must be empty");
+  const message = execFileSync("git", ["-C", root, "log", "-1", "--format=%B"], { encoding: "utf8" });
+  assert.match(message, /^T1: Verify the delivery\r?\n/);
+  assert.match(message, /^Airlock-Task: T1$/m);
+  assert.match(message, /^Evidence: npm test: pass$/m);
+  const after = await readAirlockPlan(root);
+  assert.equal(after.tasks[0].status, "done");
+  assert.equal(after.tasks[0].diffLines, 0);
+});
+
+test("a builder with no changes is still refused", async (t) => {
+  const root = await initRepo(t);
+  const plan = await readAirlockPlan(root);
+  plan.tasks.push(task("T1", { title: "Write owned feature", owns: ["src/feature.js"] }));
+  await writeAirlockPlan(root, plan);
+  assert.equal(run(root, ["start", "T1"]).status, 0);
+  const done = run(root, ["done", "T1", "--evidence", "nothing was needed"]);
+  assert.equal(done.status, 1);
+  assert.match(done.stderr, /task T1 has no changes to commit/);
+  assert.equal((await readAirlockPlan(root)).tasks[0].status, "doing");
+});
+
+test("init in a linked worktree writes the exclude into the common git dir", async (t) => {
+  const root = await bareProject(t);
+  await writeFile(path.join(root, "baseline.txt"), "baseline\n");
+  execFileSync("git", ["-C", root, "add", "baseline.txt"]);
+  execFileSync("git", ["-C", root, "commit", "-m", "baseline"]);
+  const worktree = path.join(path.dirname(root), `airlock-wt-${path.basename(root)}`);
+  execFileSync("git", ["-C", root, "worktree", "add", worktree]);
+  t.after(() => rm(worktree, { recursive: true, force: true }));
+  const init = run(worktree, ["init", "A delivery", "--done", "test passes"]);
+  assert.equal(init.status, 0, init.stderr);
+  assert.equal(existsSync(path.join(worktree, ".airlock", "plan.json")), true);
+  const exclude = await readFile(path.join(root, ".git", "info", "exclude"), "utf8");
+  assert.match(exclude, /^\.airlock\/$/m);
+  assert.equal(execFileSync("git", ["-C", worktree, "status", "--porcelain"], { encoding: "utf8" }), "");
 });
 
 test("next rejects unrecognised positional input", async (t) => {

@@ -14,7 +14,7 @@ Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The com
 
 ## Plan File
 
-`airlock.plan.json` is the only authored workflow artifact (`schema: "airlock.plan/v4"`). It holds the goal, testable done criteria, task contracts, decisions, evidence, and lifecycle state. Store it at the repository root or under `docs/airlock/`.
+`airlock.plan.json` is the only authored workflow artifact (`schema: "airlock.plan/v4"`). It holds the goal, testable done criteria, task contracts, decisions, evidence, and lifecycle state. `init` keeps it at `.airlock/plan.json`, excluded from git per clone through `.git/info/exclude`, so it never lands in a merge request and disappears with the worktree; the legacy locations, the repository root and `docs/airlock/`, keep working for a committed plan.
 
 Each task requires an id, role (`builder`, `checker`, or `browser`), at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance. A task may declare `expensive: true`; absent or `expensive: false` means not expensive, and any non-boolean value is rejected. `budget.maxExpensive` caps how many expensive tasks may run or complete. Tasks never carry a `risk` or `model` field: `risk` was removed in v4, and model choice belongs to the host agent files.
 
@@ -111,7 +111,7 @@ Coordinator verbs: `next`, `start`, `run`, `done`, `block`, `ask`, `answer`, `st
 
 Routing lives in `~/.airlock/routing.json` (override with `--routing <path>`), schema version 1: `bindings.<role>.<tier>` for each role (`builder`, `checker`, `browser`) and tier (`default`, `expensive` — `expensive` when the task says `expensive: true`), each slot exactly `{ "executor": "claude" | "codex" | "opencode", "model": "...", "effort": "..." }` with `effort` optional. Optional top-level `timeoutMinutes` defaults to 30. Unknown keys anywhere are rejected, and a missing slot for the selected role and tier fails closed with the JSON path named. Executors run with the repository root as their working directory, the prompt on stdin, and the inherited environment minus `CLAUDE_CODE_SUBAGENT_MODEL`: `claude --print --model <m> [--effort <e>] --permission-mode bypassPermissions`, `codex exec -m <m> [-c model_reasoning_effort=<e>] --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message <file>`, `opencode run -m <m> [--variant <e>] --auto`.
 
-Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`.
+Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`; it writes the plan to `.airlock/plan.json` (adding `.airlock/` to `.git/info/exclude`) unless `--plan` or an existing plan says otherwise, and the plan joins a task commit only when git already tracks it.
 
 All commands support `--json`; use `--plan <path>` when a repository has more than one delivery plan. `--host claude|opencode` is meaningful only on `init` (it selects the OpenCode bootstrap); on every other command it is accepted and ignored as a deprecated no-op, and the `AIRLOCK_HOST` environment variable is no longer read.
 
