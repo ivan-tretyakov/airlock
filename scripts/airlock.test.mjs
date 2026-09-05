@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,8 +10,6 @@ import { ownsPath, upgradePlan, validatePlan } from "./airlock.mjs";
 
 const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "airlock.mjs");
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PACKAGED_31_SHIM_HASH = "9201872f0c11c80d2a76b90bd14afc911943f7cf2923bd4212798a07eaba6e8e";
-const PACKAGED_400_SHIM_HASH = "4b4d5b3a87bca1afd8b8bdcd2c1acc35960d62ac0d200c0373e881782fc792ca";
 
 function task(id, overrides = {}) {
   return { id, title: id, role: "builder", owns: [`src/${id}.js`], dependsOn: [], acceptance: "test passes", status: "todo", evidence: [], startedAt: null, finishedAt: null, note: null, ...overrides };
@@ -83,10 +80,6 @@ async function initRepo(t, goal = "A delivery") {
   return root;
 }
 
-function contentHash(value) {
-  return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
-}
-
 function commitNumstatTotal(root, sha, exclude = "airlock.plan.json") {
   return execFileSync("git", ["-C", root, "show", "--numstat", "--format=", sha], { encoding: "utf8" })
     .split(/\r?\n/)
@@ -137,7 +130,8 @@ async function fakeExecutors(t) {
     'process.stdin.on("end", () => {',
     "  const argv = process.argv.slice(2);",
     "  writeFileSync(process.env.FAKE_RECORD, JSON.stringify({ argv, stdin: input }));",
-    '  const owned = input.match(/^OWNS  (.+)$/m);',
+    '  const reportsOnly = input.startsWith("Verify only the printed acceptance criterion");',
+    '  const owned = reportsOnly ? null : input.match(/^OWNS  (.+)$/m);',
     '  if (owned) { mkdirSync(path.dirname(path.resolve(owned[1])), { recursive: true }); writeFileSync(path.resolve(owned[1]), "built\\n"); }',
     '  if (process.env.FAKE_STRAY) writeFileSync(path.resolve(process.env.FAKE_STRAY), "stray\\n");',
     '  const last = argv.indexOf("--output-last-message");',
@@ -196,7 +190,7 @@ test("v4 schema governs expensive, residual risk, and task model", () => {
   assert.doesNotThrow(() => validatePlan(basePlan([task("T1", { expensive: false })])));
   assert.throws(() => validatePlan(basePlan([task("T1", { expensive: "yes" })])), /task T1 expensive must be a boolean/);
   assert.throws(() => validatePlan(basePlan([task("T1", { risk: "critical" })])), /task T1 risk was removed in v4; use expensive: true for critical-cost tasks/);
-  assert.throws(() => validatePlan(basePlan([task("T1", { model: "sonnet" })])), /task T1 model is not supported; model choice belongs to the host agent files/);
+  assert.throws(() => validatePlan(basePlan([task("T1", { model: "sonnet" })])), /task T1 model is not supported; model choice belongs to the routing file/);
 });
 
 test("upgradePlan maps every v3 risk level and rejects a premature expensive field", () => {
@@ -336,69 +330,12 @@ test("init state does not poison the first task boundary", async (t) => {
   assert.equal(run(root, ["start", "T1"]).status, 0);
 });
 
-test("OpenCode bootstrap installs the command and static role agents without replacing the plan", async (t) => {
-  const root = await project(t, basePlan([task("T1", { title: "Bootstrap" })]));
-  const before = await readFile(path.join(root, "airlock.plan.json"), "utf8");
-  const result = run(root, ["init", "--host", "opencode"]);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(await readFile(path.join(root, "airlock.plan.json"), "utf8"), before);
-  const shim = await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8");
-  assert.match(shim, /airlock next/);
-  assert.match(shim, /AGENT airlock-/);
-  for (const role of ["builder", "checker", "browser"]) {
-    const agent = await readFile(path.join(root, ".opencode", "agent", `airlock-${role}.md`), "utf8");
-    assert.match(agent, /mode: subagent/);
-    assert.doesNotMatch(agent, /^model:/m);
-    assert.doesNotMatch(agent, /^variant:/m);
-    assert.doesNotMatch(agent, /^tools:/m);
-    if (role === "builder") assert.doesNotMatch(agent, /permission:/);
-    else assert.match(agent, /permission:\n  edit: deny/);
-  }
-  assert.match(await readFile(path.join(root, ".opencode", "agent", "airlock-builder.md"), "utf8"), /Implement only the printed task/);
-  assert.equal(run(root, ["start", "T1"]).status, 0);
-});
-
-test("re-running init preserves a customized OpenCode agent file", async (t) => {
-  const root = await project(t, basePlan([task("T1")]));
-  assert.equal(run(root, ["init", "--host", "opencode"]).status, 0);
-  const agentPath = path.join(root, ".opencode", "agent", "airlock-builder.md");
-  await writeFile(agentPath, "---\nmodel: my/custom-model\nmode: subagent\n---\n\ncustom body\n");
-  const again = run(root, ["init", "--host", "opencode"]);
-  assert.equal(again.status, 0, again.stderr);
-  assert.match(await readFile(agentPath, "utf8"), /my\/custom-model/);
-});
-
-test("OpenCode bootstrap auto-upgrades only unmodified packaged command shims", async (t) => {
-  const root = await project(t, basePlan([task("T1")]));
-  const commandDir = path.join(root, ".opencode", "command");
-  const commandPath = path.join(commandDir, "airlock.md");
-  await mkdir(commandDir, { recursive: true });
-  const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
-  const packaged31 = await readFile(path.join(fixtures, "opencode-command-3.1.0-packaged.md"), "utf8");
-  assert.equal(contentHash(packaged31), PACKAGED_31_SHIM_HASH, "fixture must hold the real packaged 3.1 shim bytes");
-  const packaged400 = await readFile(path.join(fixtures, "opencode-command-4.0.0-packaged.md"), "utf8");
-  assert.equal(contentHash(packaged400), PACKAGED_400_SHIM_HASH, "fixture must hold the real packaged 4.0.0 shim bytes");
-  for (const legacy of ["opencode-command-3.1.0.md", "opencode-command-3.1.0-fallback.md", "opencode-command-3.1.0-packaged.md", "opencode-command-4.0.0-packaged.md"]) {
-    await writeFile(commandPath, await readFile(path.join(fixtures, legacy), "utf8"));
-    const upgraded = run(root, ["init", "--host", "opencode"]);
-    assert.equal(upgraded.status, 0, upgraded.stderr);
-    const content = await readFile(commandPath, "utf8");
-    assert.match(content, /AGENT airlock-/, legacy);
-    assert.match(content, /airlock#v4\.0\.1/, legacy);
-    assert.doesNotMatch(content, /--host/, legacy);
-  }
-
-  const customizedCurrent = `${await readFile(commandPath, "utf8")}\nProject-specific note.\n`;
-  await writeFile(commandPath, customizedCurrent);
-  const preserved = run(root, ["init", "--host", "opencode"]);
-  assert.equal(preserved.status, 0, preserved.stderr);
-  assert.equal(await readFile(commandPath, "utf8"), customizedCurrent);
-
-  await writeFile(commandPath, "custom stale command\n");
-  const custom = run(root, ["init", "--host", "opencode"]);
-  assert.equal(custom.status, 1);
-  assert.match(custom.stderr, /merge the current packaged command manually/);
-  assert.equal(await readFile(commandPath, "utf8"), "custom stale command\n");
+test("init rejects --host as an unknown flag and writes nothing", async (t) => {
+  const root = await bareProject(t);
+  const result = run(root, ["init", "A delivery", "--done", "test passes", "--host", "opencode"]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unknown flag: --host/);
+  assert.equal(existsSync(path.join(root, ".airlock", "plan.json")), false, "a rejected init must not write a plan");
 });
 
 test("next, start, audit, and done create an audited task commit", async (t) => {
@@ -420,13 +357,12 @@ test("next, start, audit, and done create an audited task commit", async (t) => 
   assert.equal((await readPlanFile(root)).tasks[0].status, "done");
 });
 
-test("--host is accepted and ignored on non-init commands", async (t) => {
-  const root = await project(t, basePlan([task("T1")]));
-  const next = run(root, ["next", "--host", "opencode"]);
-  assert.equal(next.status, 0, next.stderr);
-  assert.match(next.stdout, /TASK T1 · builder/);
-  assert.equal(run(root, ["start", "T1", "--host", "opencode"], { AIRLOCK_HOST: "bogus" }).status, 0);
-  assert.equal(run(root, ["status", "--host", "claude"]).status, 0);
+test("render --md still prints the role column", async (t) => {
+  const root = await project(t, basePlan([task("C1", { role: "checker", title: "Verify the export" })]));
+  const render = run(root, ["render", "--md"]);
+  assert.equal(render.status, 0, render.stderr);
+  assert.match(render.stdout, /\| ID \| Task \| State \| Role \|/);
+  assert.match(render.stdout, /\| C1 \| Verify the export \| todo \| checker \|/);
 });
 
 test("render --md replaces the route column with the role", async (t) => {
@@ -906,12 +842,11 @@ test("a plan without review fields keeps its old shapes and missing diffLines co
   assert.equal(run(root, ["status"]).stdout.split(/\r?\n/)[1], "REVIEW  3/10 lines", "a done task without diffLines counts 0");
 });
 
-test("prompt surface contains only the slim roles and two shims", async () => {
+test("prompt surface contains only the slim roles and one command", async () => {
   const root = packageRoot;
   const files = [
     ...(await readdir(path.join(root, "commands"))).map((name) => path.join(root, "commands", name)),
     ...(await readdir(path.join(root, "roles"))).map((name) => path.join(root, "roles", name)),
-    ...(await readdir(path.join(root, ".opencode", "command"))).map((name) => path.join(root, ".opencode", "command", name)),
   ];
   const bytes = (await Promise.all(files.map((file) => readFile(file, "utf8")))).reduce(
     (sum, text) => sum + Buffer.byteLength(text.replaceAll("\r\n", "\n"), "utf8"),
@@ -924,33 +859,20 @@ test("prompt surface contains only the slim roles and two shims", async () => {
     assert.ok(size <= 800, `${role}.md is ${size} bytes; ceiling is 800`);
     assert.match(text, new RegExp(`^name: airlock-${role}$`, "m"));
   }
-  for (const command of [".opencode/command/airlock.md"]) {
-    const text = await readFile(path.join(root, command), "utf8");
-    assert.match(text, /unattended/);
-    assert.match(text, /AGENT airlock-/);
-    assert.doesNotMatch(text, /fallback <id>/);
-    assert.doesNotMatch(text, /--class <class>/);
-    assert.doesNotMatch(text, /Never fallback after any child result/);
-    assert.doesNotMatch(text, /--host/);
-  }
   const claudeCommand = await readFile(path.join(root, "commands", "airlock.md"), "utf8");
   assert.match(claudeCommand, /airlock\.mjs" run/);
   assert.doesNotMatch(claudeCommand, /AGENT airlock-/, "the runner command never dispatches a subagent");
   assert.doesNotMatch(claudeCommand, /--host/);
   const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
-  assert.equal(packageJson.version, "4.0.1");
+  assert.equal(packageJson.version, "5.0.0");
+  assert.equal(packageJson.description, "Plan-driven multimodel task orchestration with headless executor dispatch.");
   assert.equal(packageJson.repository.url, "git+https://github.com/ivan-tretyakov/airlock.git");
-  assert.ok(packageJson.files.includes("scripts/airlock.mjs"));
-  assert.ok(packageJson.files.includes("roles"));
-  assert.ok(packageJson.files.includes(".opencode/command/airlock.md"));
-  const openCodeShim = await readFile(path.join(root, ".opencode", "command", "airlock.md"), "utf8");
-  assert.match(openCodeShim, /npm install --global github:ivan-tretyakov\/airlock#v4\.0\.1/);
-  assert.doesNotMatch(openCodeShim, /#v3\.0\.0|#v3\.1\.0|#v4\.0\.0/);
+  assert.deepEqual(packageJson.files, ["scripts/airlock.mjs", "roles", "commands/airlock.md", "README.md", "LICENSE"]);
   const plugin = JSON.parse(await readFile(path.join(root, ".claude-plugin", "plugin.json"), "utf8"));
-  assert.equal(plugin.version, "4.0.1");
-  assert.deepEqual(plugin.agents, ["./roles/builder.md", "./roles/checker.md", "./roles/browser.md"]);
+  assert.equal(plugin.version, "5.0.0");
+  assert.equal("agents" in plugin, false, "the plugin registers no agents; the runner reads the roles itself");
   const marketplace = JSON.parse(await readFile(path.join(root, ".claude-plugin", "marketplace.json"), "utf8"));
-  assert.equal(marketplace.plugins[0].version, "4.0.1");
+  assert.equal(marketplace.plugins[0].version, "5.0.0");
 });
 
 test("run routing validation rejects unknown keys and executors and names the missing slot", async (t) => {
@@ -1175,8 +1097,11 @@ test("run parks blocking decisions with exit 2 like next --unattended", async (t
   assert.equal(existsSync(bin.record), false);
 });
 
-test("a passing checker completes the run cycle end to end", { skip: "needs the checker empty-commit rule from spec 1 (2026-09-04-airlock-5.0-plan-state.md); enable once it lands" }, async (t) => {
-  const root = await project(t, basePlan([task("T1"), task("C1", { role: "checker", owns: ["docs/C1.md"], dependsOn: ["T1"] })]));
+test("a passing checker completes the run cycle end to end", async (t) => {
+  const root = await initRepo(t);
+  const plan = await readAirlockPlan(root);
+  plan.tasks.push(task("T1"), task("C1", { role: "checker", owns: ["docs/C1.md"], dependsOn: ["T1"] }));
+  await writeAirlockPlan(root, plan);
   const bin = await fakeExecutors(t);
   const routingPath = await writeRoutingFile(bin, canonicalRouting());
   const result = runBin(root, ["run", "--all", "--routing", routingPath], bin, { message: "EVIDENCE: PASS npm test: verified" });
@@ -1184,5 +1109,5 @@ test("a passing checker completes the run cycle end to end", { skip: "needs the 
   assert.match(result.stdout, /^RAN C1 DONE [0-9a-f]{40}$/m);
   const sha = result.stdout.match(/^RAN C1 DONE ([0-9a-f]{40})$/m)[1];
   assert.equal(execFileSync("git", ["-C", root, "show", "--name-only", "--format=", sha], { encoding: "utf8" }).trim(), "", "a reporting-only checker completes with an empty commit");
-  assert.match(execFileSync("git", ["-C", root, "log", "-1", "--format=%B", sha], { encoding: "utf8" }), /Airlock-Task: C1\nEvidence: npm test: verified/);
+  assert.match(execFileSync("git", ["-C", root, "log", "-1", "--format=%B", sha], { encoding: "utf8" }), /Airlock-Task: C1\r?\n\r?\nEvidence: npm test: verified/);
 });

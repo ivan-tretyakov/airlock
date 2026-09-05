@@ -1,7 +1,7 @@
 {
   "name": "airlock",
-  "version": "4.0.1",
-  "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
+  "version": "5.0.0",
+  "description": "Plan-driven multimodel task orchestration with headless executor dispatch.",
   "type": "module",
   "bin": {
     "airlock": "scripts/airlock.mjs"
@@ -16,7 +16,7 @@
   "files": [
     "scripts/airlock.mjs",
     "roles",
-    ".opencode/command/airlock.md",
+    "commands/airlock.md",
     "README.md",
     "LICENSE"
   ],

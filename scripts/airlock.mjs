@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -18,12 +17,6 @@ const BLOCKING_CASES = new Set(["irreversible", "external", "access", "rework", 
 const ROUTING_EXECUTORS = new Set(["claude", "codex", "opencode"]);
 const ROUTING_TIERS = new Set(["default", "expensive"]);
 const DEFAULT_ROUTING_TIMEOUT_MINUTES = 30;
-const LEGACY_OPENCODE_COMMAND_HASHES = new Set([
-  "93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e",
-  "e0073a668602070e7cb2e9a78c916a75628848bcf2a23f2c8e930b8b69f54997",
-  "9201872f0c11c80d2a76b90bd14afc911943f7cf2923bd4212798a07eaba6e8e",
-  "4b4d5b3a87bca1afd8b8bdcd2c1acc35960d62ac0d200c0373e881782fc792ca",
-]);
 let commandTimestamp = null;
 let planUpgraded = false;
 class AirlockError extends Error {
@@ -128,10 +121,6 @@ function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function contentHash(value) {
-  return createHash("sha256").update(value.replaceAll("\r\n", "\n")).digest("hex");
-}
-
 function assertArrayOfStrings(value, label, minimum = 0) {
   if (!Array.isArray(value) || value.length < minimum || value.some((item) => !isNonEmptyString(item))) {
     throw new AirlockError(`${label} must contain${minimum ? " at least one" : " only"} non-empty string${minimum === 1 ? "" : "s"}`);
@@ -166,7 +155,7 @@ function validatePlan(plan) {
     if (!ROLES.has(task.role)) throw new AirlockError(`task ${task.id} has invalid role: ${task.role}`);
     if ("risk" in task) throw new AirlockError(`task ${task.id} risk was removed in v4; use expensive: true for critical-cost tasks`);
     if (task.expensive !== undefined && typeof task.expensive !== "boolean") throw new AirlockError(`task ${task.id} expensive must be a boolean`);
-    if (task.model !== undefined) throw new AirlockError(`task ${task.id} model is not supported; model choice belongs to the host agent files`);
+    if (task.model !== undefined) throw new AirlockError(`task ${task.id} model is not supported; model choice belongs to the routing file`);
     if (task.diffLines !== undefined && (!Number.isSafeInteger(task.diffLines) || task.diffLines < 0)) throw new AirlockError(`task ${task.id} diffLines must be a non-negative integer`);
     assertArrayOfStrings(task.owns, `task ${task.id} owns`, 1);
     if (task.owns.some((owned) => path.isAbsolute(owned) || normalizePath(owned).startsWith("../"))) {
@@ -336,9 +325,7 @@ function isCoordinatorPath(item, planPath, root) {
   const normalized = normalizePath(item);
   return normalized === relativePlan(root, planPath)
     || normalized === ".airlock"
-    || normalized.startsWith(".airlock/")
-    || normalized === ".opencode/command/airlock.md"
-    || normalized.startsWith(".opencode/agent/airlock-");
+    || normalized.startsWith(".airlock/");
 }
 
 function dirtyProductPaths(root, planPath) {
@@ -832,47 +819,6 @@ function roleBody(role) {
   return roleSource(role).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
-function roleDescription(role) {
-  const description = roleSource(role).match(/^description:\s*(.+)$/m)?.[1]?.trim();
-  if (!description) throw new AirlockError(`role ${role} has no description declaration`);
-  return description;
-}
-
-function openCodeAgentMarkdown(role) {
-  const permission = role === "builder" ? "" : "permission:\n  edit: deny\n";
-  return `---\ndescription: ${roleDescription(role)}\nmode: subagent\n${permission}---\n\n${roleBody(role)}`;
-}
-
-async function bootstrapOpenCode(root) {
-  const created = [];
-  const sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const commandPath = path.join(root, ".opencode", "command", "airlock.md");
-  const source = readFileSync(path.join(sourceRoot, ".opencode", "command", "airlock.md"), "utf8");
-  if (!existsSync(commandPath)) {
-    await mkdir(path.dirname(commandPath), { recursive: true });
-    await writeFile(commandPath, source, "utf8");
-    created.push(commandPath);
-  } else {
-    const current = readFileSync(commandPath, "utf8");
-    if (contentHash(current) !== contentHash(source)) {
-      if (LEGACY_OPENCODE_COMMAND_HASHES.has(contentHash(current))) {
-        await writeFile(commandPath, source, "utf8");
-        created.push(commandPath);
-      } else if (!current.includes("AGENT airlock-")) {
-        throw new AirlockError(`custom OpenCode Airlock command lacks static agent dispatch: ${commandPath}; merge the current packaged command manually`);
-      }
-    }
-  }
-  for (const role of ROLES) {
-    const agentPath = path.join(root, ".opencode", "agent", `airlock-${role}.md`);
-    if (existsSync(agentPath)) continue;
-    await mkdir(path.dirname(agentPath), { recursive: true });
-    await writeFile(agentPath, openCodeAgentMarkdown(role), "utf8");
-    created.push(agentPath);
-  }
-  return created;
-}
-
 function parseReviewLines(raw) {
   if (raw === undefined) return null;
   const value = typeof raw === "string" && /^[+-]?\d+$/.test(raw.trim()) ? Number(raw.trim()) : Number.NaN;
@@ -894,52 +840,61 @@ function excludeAirlockDirectory(root) {
 }
 
 async function initPlan(root, planPath, goal, flags) {
-  const existing = existsSync(planPath);
-  if (existing && flags.host !== "opencode") throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
-  let plan;
-  if (existing) {
-    plan = readPlan(planPath);
-  } else {
-    const done = String(flags.done ?? "").split("|").map((item) => item.trim()).filter(Boolean);
-    if (done.length === 0) throw new AirlockError("init requires at least one testable done criterion via --done \"criterion|criterion\"");
-    const reviewLines = parseReviewLines(flags["review-lines"]);
-    await mkdir(path.dirname(planPath), { recursive: true });
-    plan = {
-      schema: SCHEMA,
-      goal: requireValue(goal, "goal"),
-      done,
-      nonGoals: [],
-      created: commandNow(),
-      budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2), ...(reviewLines === null ? {} : { reviewLines }) },
-      tasks: [],
-      decisions: [],
-    };
-    validatePlan(plan);
-    writePlan(planPath, plan);
-  }
-  const bootstrap = flags.host === "opencode" ? await bootstrapOpenCode(root) : [];
-  if (existsSync(path.join(root, ".git"))) {
-    excludeAirlockDirectory(root);
-    if (bootstrap.length) {
-      const paths = bootstrap.filter(existsSync).map((item) => normalizePath(path.relative(root, item)));
-      git(root, ["add", "--", ...paths]);
-    }
-  }
+  if (existsSync(planPath)) throw new AirlockError(`refusing to overwrite existing plan: ${planPath}`);
+  const done = String(flags.done ?? "").split("|").map((item) => item.trim()).filter(Boolean);
+  if (done.length === 0) throw new AirlockError("init requires at least one testable done criterion via --done \"criterion|criterion\"");
+  const reviewLines = parseReviewLines(flags["review-lines"]);
+  await mkdir(path.dirname(planPath), { recursive: true });
+  const plan = {
+    schema: SCHEMA,
+    goal: requireValue(goal, "goal"),
+    done,
+    nonGoals: [],
+    created: commandNow(),
+    budget: { maxTasks: Number(flags["max-tasks"] ?? 8), maxExpensive: Number(flags["max-expensive"] ?? 2), ...(reviewLines === null ? {} : { reviewLines }) },
+    tasks: [],
+    decisions: [],
+  };
+  validatePlan(plan);
+  writePlan(planPath, plan);
+  if (existsSync(path.join(root, ".git"))) excludeAirlockDirectory(root);
   return plan;
 }
 
 function help() {
   return [
     "Usage: airlock <init|next|start|run|done|block|ask|answer|status|audit|render> [arguments] [--plan path] [--json]",
-    "init only: --host claude|opencode (opencode bootstraps .opencode/command and .opencode/agent files)",
     "run only: --all (loop until nothing is runnable), --dry-run (print the resolved command), --routing <path> (default ~/.airlock/routing.json)",
   ].join("\n");
+}
+
+const COMMAND_FLAGS = {
+  init: ["done", "max-tasks", "max-expensive", "review-lines"],
+  next: ["unattended"],
+  start: ["parallel"],
+  run: ["all", "dry-run", "routing"],
+  done: ["evidence"],
+  block: ["reason"],
+  ask: ["task", "options", "assume", "recommend", "blocking", "case"],
+  answer: [],
+  status: [],
+  audit: ["range", "revert-out-of-scope"],
+  render: ["md"],
+};
+const GLOBAL_FLAGS = new Set(["plan", "json", "help"]);
+
+function assertKnownFlags(command, flags) {
+  if (!COMMAND_FLAGS[command]) return;
+  const allowed = new Set([...COMMAND_FLAGS[command], ...GLOBAL_FLAGS]);
+  const unknown = Object.keys(flags).filter((key) => !allowed.has(key));
+  if (unknown.length) throw new AirlockError(`unknown flag: --${unknown[0]}`);
 }
 
 async function main(argv = process.argv.slice(2)) {
   const { positional, flags } = parseCli(argv);
   const command = positional.shift();
   if (!command || command === "help" || flags.help) return output(help(), flags.json);
+  assertKnownFlags(command, flags);
   const root = findRoot();
   commandTimestamp = commandNow();
   if (command === "init") {

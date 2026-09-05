@@ -1,22 +1,30 @@
 # airlock
 
-Airlock is plan-driven task orchestration for Claude Code and OpenCode. One `airlock.plan.json` gives each worker a goal, owned paths, acceptance criterion, role, and durable state. The coordinator validates that plan before dispatch rather than attempting to predict individual tool calls, and every accepted task lands as one audited commit with an `Airlock-Task` trailer and evidence.
+Airlock is plan-driven multimodel task orchestration with headless executor dispatch. One plan file gives each worker a goal, owned paths, an acceptance criterion, a role, and durable state. The coordinator validates the plan before dispatch rather than attempting to predict individual tool calls, and every accepted task lands as one audited commit with an `Airlock-Task` trailer and evidence.
 
 ## Quick Start
 
-Create one delivery plan at the repository root:
+Install the CLI globally from the release tag:
+
+```text
+npm install --global github:ivan-tretyakov/airlock#v5.0.0
+```
+
+For local development, run `npm link` in a checkout.
+
+Write `~/.airlock/routing.json` with one slot per role and tier (see [Running](#running)). Then create one delivery plan in a worktree of the repository:
 
 ```text
 airlock init "Add an export command" --done "npm test passes|the command writes a valid export"
 ```
 
-Add tasks to `airlock.plan.json`, then invoke `/airlock` on either host. The command loops through runnable tasks, dispatches each one to its static `AGENT airlock-<role>` from `airlock next`, audits changed paths, commits each accepted task, and stops only when no task remains runnable.
+Add tasks to the plan, then run `airlock run`. The runner loops through runnable tasks, dispatches each one to its routed executor CLI, audits changed paths, commits each accepted task, and stops when no task remains runnable. From a Claude Code session with the plugin installed, `/airlock` drives the same loop.
 
 ## Plan File
 
 `airlock.plan.json` is the only authored workflow artifact (`schema: "airlock.plan/v4"`). It holds the goal, testable done criteria, task contracts, decisions, evidence, and lifecycle state. `init` keeps it at `.airlock/plan.json`, excluded from git per clone through `.git/info/exclude`, so it never lands in a merge request and disappears with the worktree; the legacy locations, the repository root and `docs/airlock/`, keep working for a committed plan.
 
-Each task requires an id, role (`builder`, `checker`, or `browser`), at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance. A task may declare `expensive: true`; absent or `expensive: false` means not expensive, and any non-boolean value is rejected. `budget.maxExpensive` caps how many expensive tasks may run or complete. Tasks never carry a `risk` or `model` field: `risk` was removed in v4, and model choice belongs to the host agent files.
+Each task requires an id, role (`builder`, `checker`, or `browser`), at least one repository-relative `owns` path/glob, dependencies, and one testable `acceptance` statement. A task is never dispatched without both ownership and acceptance. A task may declare `expensive: true`; absent or `expensive: false` means not expensive, and any non-boolean value is rejected. `budget.maxExpensive` caps how many expensive tasks may run or complete. Tasks never carry a `risk` or `model` field: `risk` was removed in v4, and model choice belongs to the routing file.
 
 ### Authoring tasks
 
@@ -30,7 +38,7 @@ One task with one obvious verification command needs no plan: just do the work a
 
 ### A well-understood multi-task feature
 
-Resolve the open design questions first (an interrogation skill such as Matt Pocock's `/grill-me` works well), then `airlock init` with testable `--done` criteria and author tasks whose `acceptance` lines come from the resolved questions. Run `/airlock`. An export-feature plan typically looks like two builders plus one consolidated checker that `dependsOn` both:
+Resolve the open design questions first (an interrogation skill such as Matt Pocock's `/grill-me` works well), then `airlock init` with testable `--done` criteria and author tasks whose `acceptance` lines come from the resolved questions. Run `airlock run`. An export-feature plan typically looks like two builders plus one consolidated checker that `dependsOn` both:
 
 ```json
 {
@@ -87,7 +95,7 @@ Resolve the open design questions first (an interrogation skill such as Matt Poc
 
 ### Ambiguous multi-week work
 
-Keep a decision map upstream of Airlock — Wayfinder, or a plain markdown decision log. Convert each fog-free region of the map into one Airlock plan, execute it with `/airlock`, then note the resulting `Airlock-Task` commits back on the map. Airlock deliberately owns only the execution slice; it is not a discovery or roadmap tool.
+Keep a decision map upstream of Airlock — Wayfinder, or a plain markdown decision log. Convert each fog-free region of the map into one Airlock plan, execute it with `airlock run`, then note the resulting `Airlock-Task` commits back on the map. Airlock deliberately owns only the execution slice; it is not a discovery or roadmap tool.
 
 ### Work that is too large for one pull request
 
@@ -101,57 +109,55 @@ airlock init "Export: 3 of 3 — docs and telemetry" --done "npm test passes" --
 
 ### Intake routing
 
-Bugs and questions are not plan items. File bugs in the issue tracker with the exact repro command — that text later becomes an `acceptance` line when the fix is planned. Codebase questions are just conversation. Questions that arise mid-run are `airlock ask --assume <default>` (or `--blocking --case <case>` for the five allowed cases). Design unknowns that exist before any plan does belong in the upstream decision map, not in `airlock.plan.json`.
+Bugs and questions are not plan items. File bugs in the issue tracker with the exact repro command — that text later becomes an `acceptance` line when the fix is planned. Codebase questions are just conversation. Questions that arise mid-run are `airlock ask --assume <default>` (or `--blocking --case <case>` for the five allowed cases). Design unknowns that exist before any plan does belong in the upstream decision map, not in the plan file.
 
 ## Commands
 
 Coordinator verbs: `next`, `start`, `run`, `done`, `block`, `ask`, `answer`, `status`, `audit`.
 
-`airlock run` executes the next runnable task end to end: it resolves the worker from routing, spawns the executor CLI headless with the role body plus the task brief as its prompt, waits for exit, parses one `EVIDENCE:` line from the worker's final message, then runs `audit` and `done --evidence` on `PASS` or `block --reason` on `FAIL`. One invocation runs one task so a driving session can steer between tasks; `--all` loops until nothing is runnable, one worker at a time. Any executor failure — non-zero exit, missing binary, or timeout — blocks the task with the cause and stops the run; nothing retries and nothing falls back. A worker whose final line does not read `EVIDENCE: PASS ...` or `EVIDENCE: FAIL ...` blocks with `worker returned no EVIDENCE line`. `--dry-run` prints the resolved executor command line and prompt length without launching anything. `run` stops with the same texts and exit codes the other verbs produce: `PARKED` (exit 2), `NOTHING TO DO`, `BUDGET REACHED`.
+Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`; it writes the plan to `.airlock/plan.json` (adding `.airlock/` to `.git/info/exclude`) unless `--plan` says otherwise, and the plan joins a task commit only when git already tracks it. `render --md` prints the plan as a markdown table with the role column.
 
-Routing lives in `~/.airlock/routing.json` (override with `--routing <path>`), schema version 1: `bindings.<role>.<tier>` for each role (`builder`, `checker`, `browser`) and tier (`default`, `expensive` — `expensive` when the task says `expensive: true`), each slot exactly `{ "executor": "claude" | "codex" | "opencode", "model": "...", "effort": "..." }` with `effort` optional. Optional top-level `timeoutMinutes` defaults to 30. Unknown keys anywhere are rejected, and a missing slot for the selected role and tier fails closed with the JSON path named. Executors run with the repository root as their working directory, the prompt on stdin, and the inherited environment minus `CLAUDE_CODE_SUBAGENT_MODEL`: `claude --print --model <m> [--effort <e>] --permission-mode bypassPermissions`, `codex exec -m <m> [-c model_reasoning_effort=<e>] --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message <file>`, `opencode run -m <m> [--variant <e>] --auto`.
+All commands support `--json`; use `--plan <path>` when a repository has more than one delivery plan. Unknown flags are rejected on every verb.
 
-Utilities: `init`, `render`. `init` takes `--done "a|b"`, `--max-tasks`, `--max-expensive`, and the advisory `--review-lines`; it writes the plan to `.airlock/plan.json` (adding `.airlock/` to `.git/info/exclude`) unless `--plan` or an existing plan says otherwise, and the plan joins a task commit only when git already tracks it.
-
-All commands support `--json`; use `--plan <path>` when a repository has more than one delivery plan. `--host claude|opencode` is meaningful only on `init` (it selects the OpenCode bootstrap); on every other command it is accepted and ignored as a deprecated no-op, and the `AIRLOCK_HOST` environment variable is no longer read.
-
-`next` and `start` print the task brief with a static `AGENT airlock-<role>` dispatch line. `start` requires a clean product worktree, excluding Airlock's own plan and `.airlock/` configuration. After `audit` succeeds, `done --evidence "<command + result>"` commits the exact owned changes and the plan state with an `Airlock-Task` trailer. A failed commit restores the task to `doing` so it can be retried. When a dispatch fails, the shim runs `block <id> --reason "<cause>"`.
+`next` and `start` print the task brief with its `AGENT airlock-<role>` line naming the role; the runner reads the role body from `roles/` directly. `start` requires a clean product worktree, excluding Airlock's own plan and `.airlock/` configuration. After `audit` succeeds, `done --evidence "<command + result>"` commits the exact owned changes — plus the plan when git already tracks it — with an `Airlock-Task` trailer. A checker whose audit finds no in-scope changes completes through an empty commit carrying the same trailers. A failed commit restores the task to `doing` so it can be retried.
 
 Blocked task deltas and `audit --revert-out-of-scope` recoveries are retained under `refs/airlock/blocked/...` and `refs/airlock/reverted/...`; they are never deleted. Recover with `git stash apply <reported-ref>`; inspect untracked recovery files through `<reported-ref>^3`.
+
+## Running
+
+`airlock run` is the only dispatch path. It executes the next runnable task end to end: it resolves the worker from routing, spawns the executor CLI headless with the role body plus the task brief as its prompt, waits for exit, parses one `EVIDENCE:` line from the worker's final message, then runs `audit` and `done --evidence` on `PASS` or `block --reason` on `FAIL`. One invocation runs one task so a driving session can steer between tasks; `--all` loops until nothing is runnable, one worker at a time. `--dry-run` prints the resolved executor command line and prompt length without launching anything. `run` stops with the same texts and exit codes the other verbs produce: `PARKED` (exit 2), `NOTHING TO DO`, `BUDGET REACHED`.
+
+### Routing
+
+Routing lives in `~/.airlock/routing.json` (override with `--routing <path>`), schema version 1: `bindings.<role>.<tier>` for each role (`builder`, `checker`, `browser`) and tier (`default`, `expensive` — `expensive` when the task says `expensive: true`), each slot exactly `{ "executor": "claude" | "codex" | "opencode", "model": "...", "effort": "..." }` with `effort` optional. Optional top-level `timeoutMinutes` defaults to 30. Unknown keys anywhere are rejected, and a missing slot for the selected role and tier fails closed with the JSON path named. Changing a model is a one-line edit.
+
+The initial routing table this project was built around:
+
+| role | default | expensive |
+|---|---|---|
+| builder | opencode · zai-coding-plan/glm-5.3 · high | claude · opus · high |
+| checker | codex · gpt-5.6-sol · medium | codex · gpt-5.6-sol · high |
+| browser | codex · gpt-5.6-sol · medium | claude · opus · high |
+
+Executors run with the repository root as their working directory, the prompt on stdin, and the inherited environment minus `CLAUDE_CODE_SUBAGENT_MODEL`: `claude --print --model <m> [--effort <e>] --permission-mode bypassPermissions`, `codex exec -m <m> [-c model_reasoning_effort=<e>] --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --output-last-message <file>`, `opencode run -m <m> [--variant <e>] --auto`.
+
+### The EVIDENCE contract
+
+The last non-empty line of a worker's final message must read `EVIDENCE: PASS <command and result>` or `EVIDENCE: FAIL <reason or findings path>`. The three role bodies in `roles/` state the contract — they are the single source of role text, read by the runner with their frontmatter stripped — and the runner enforces it: `PASS` leads to `audit` then `done` with the worker's text as the commit's evidence; `FAIL` blocks the task with the reason. A worker whose final line matches neither blocks with `worker returned no EVIDENCE line`.
+
+### Failure policy
+
+Any executor failure — non-zero exit, missing binary, or timeout — blocks the task with the cause and stops the run, in single and `--all` mode alike. Nothing retries and nothing falls back: the most likely runtime failure is a rate limit on one vendor, and the operator is meant to edit one routing slot and rerun rather than let the runner silently drain a second subscription. An out-of-scope worker change blocks with the audit text, exactly as a hand-driven `audit` would refuse it.
+
+### Driving a run from a model session
+
+Open a terminal in a git worktree of the repository, run `airlock run`, read the one line it prints (`RAN <id> DONE <commit>` or `RAN <id> BLOCKED <reason>`), and rerun. Between tasks you can edit the plan, answer decisions, or fix a routing slot; the session's own context stays clean because every task runs in a fresh executor process that sees only its brief. Use `--all` for a proven plan you want to finish unattended, and plain single-task invocations while a plan is still taking shape. In a Claude Code session the bundled `/airlock` command drives the same loop through the plugin and never dispatches a subagent.
 
 ## Decisions
 
 Airlock runs until truly blocked. `airlock ask` defaults to `--assume <option>`: it records a recommendation, lets work continue, and tracks tasks that consumed the assumption. Only irreversible work, external commitments, missing access, expensive balanced rework, or an untestable goal may use `--blocking --case <case>`.
 
-At `NOTHING TO DO`, `/airlock` presents all open blocking decisions and assumptions once. If an answer overturns an assumption, `answer` atomically reopens every consuming task and reports `REWORK REQUIRED`.
-
-## Hosts
-
-Dispatch is static: `next`/`start` emit `AGENT airlock-<role>`, and the three role agents in `roles/` are the single source of role bodies and tools for both hosts. Airlock no longer mediates model choice; host-native fallback handles model failures.
-
-**Claude Code** bundles the role agents through the plugin (`airlock-builder`, `airlock-checker`, `airlock-browser`); they inherit the session's model. To pin a model per role, create a same-named override agent — project `.claude/agents/airlock-<role>.md` or user `~/.claude/agents/airlock-<role>.md` — with the same `name:` and a `model:` line; the host resolves the override in preference to the plugin copy.
-
-The Claude shim invokes its bundled CLI through `${CLAUDE_PLUGIN_ROOT}`. Install the OpenCode CLI globally from the release tag:
-
-```text
-npm install --global github:ivan-tretyakov/airlock#v4.0.1
-```
-
-For local development, run `npm link` in this checkout.
-
-**OpenCode** projects bootstrap with:
-
-```text
-airlock init "Add an export command" --done "npm test passes" --host opencode
-```
-
-This writes the `/airlock` command under `.opencode/command/` and three agent files under `.opencode/agent/` (`airlock-builder.md`, `airlock-checker.md`, `airlock-browser.md`), generated from `roles/`. Edit those project-local agent files to set a model; they are hash-guarded, so re-running init preserves your edits, refreshes unmodified packaged files, and fails with a manual-merge instruction rather than overwriting a customized stale command shim.
-
-The host surface is one command each: `commands/airlock.md` and `.opencode/command/airlock.md`. There are no hooks, guard plugins, external launchers, ledgers, or lifecycle templates.
-
-## Extensions
-
-Extensions are optional adapters that use the Airlock CLI without changing hosts or the prompt surface. One extension is available: the [Herdr](https://herdr.dev/) router in `extensions/herdr/`, a Herdr plugin that runs one plan across several agent CLIs. It reads each task's role and `expensive` tier from the plan, looks the pair up in its own `routing.json`, and starts the chosen executor (`claude`, `codex`, or `opencode`) in a persistent Herdr pane. Airlock keeps every authority it has: validation, scheduling, the ownership audit, and the commit. The router owns only what 4.0 removed, namely executor and model selection, peak-time windows, route pinning, and fallback chains. It requires Airlock 4.0 or newer and installs into Herdr, not into Airlock; its configuration lives in the Herdr plugin config directory. See `docs/airlock/specs/2026-09-01-airlock-herdr-router.md`.
+At `NOTHING TO DO`, the driving session presents all open blocking decisions and assumptions once. If an answer overturns an assumption, `answer` atomically reopens every consuming task and reports `REWORK REQUIRED`.
 
 ## Validation
 
@@ -161,19 +167,21 @@ claude plugin validate .claude-plugin/plugin.json --strict
 claude plugin validate .claude-plugin/marketplace.json --strict
 ```
 
-The automated tests cover schema invariants, the v3 to v4 upgrade, lifecycle transitions, assumption rework, Git audits including shell-created writes, budget caps via `expensive`, the advisory review budget (`--review-lines`, recorded `diffLines`, the `REVIEW` advisory on `done` and `status`), and the 5,000-byte prompt-surface ceiling.
+The automated tests cover schema invariants, the v3 to v4 upgrade, lifecycle transitions, assumption rework, Git audits including shell-created writes, budget caps via `expensive`, the advisory review budget (`--review-lines`, recorded `diffLines`, the `REVIEW` advisory on `done` and `status`), routing validation and the runner cycle against fake executors, and the 5,000-byte prompt-surface ceiling.
 
 `--unattended` forwards to `next`; a blocking decision returns `PARKED` and ends the run without prompting. `maxExpensive` caps tasks declared `expensive: true`. Parallel writers require `--parallel` and disjoint ownership; overlapping or ambiguous glob prefixes remain serialized.
 
 ## Migration
 
+### Upgrading from 4.x
+
+5.0.0 is a breaking release: dispatch moved entirely to `airlock run` and everything that served session-side dispatch is gone. Read `docs/airlock/releases/5.0.0.md` for the full migration and a machine-cleanup checklist. In short: install the CLI globally from the `v5.0.0` tag, write `~/.airlock/routing.json`, and drive plans with `airlock run`; the old bootstrap flag on `init` is now rejected as an unknown flag, and per-role model choice moves from agent files to the routing file.
+
 ### Upgrading from 3.x
 
 Plans upgrade automatically: `readPlan` accepts `airlock.plan/v3`, maps `risk: "critical"` to `expensive: true` and drops the other risk levels, and the first state-mutating command (`start`, `done`, `block`, `ask`, `answer`) persists the v4 form. Read-only commands (`next`, `status`, `audit`, `render`) print an `UPGRADED` notice on stderr each run and leave the file at v3.
 
-The 3.x routing artifacts are obsolete and ignored; you may delete them by hand: user and project `models.json`, `router-state.json`, and generated `airlock-<role>-<model>-<effort>` agents in `~/.claude/agents/` and the OpenCode user config directory. Per-role model preferences move into host agent files: edit `.opencode/agent/airlock-<role>.md` on OpenCode, or create a Claude override agent as described in Hosts.
-
-The 3.x Herdr adapter was never released; the Herdr router in `extensions/herdr/` replaces it and requires Airlock 4.0 or newer. Convert an existing `models.json` into the router's own `routing.json` with `airlock-herdr import-routes`; the router reads no Airlock configuration.
+The 3.x routing artifacts are obsolete and ignored; you may delete them by hand: user and project `models.json`, `router-state.json`, and generated `airlock-<role>-<model>-<effort>` agents in your user-level agent directories. Per-role model preferences move into the routing file. The optional pane router extension shipped in 4.x was removed in 5.0; its design documents are archived under `docs/airlock/archive/2026-09/`.
 
 ### From 2.x
 

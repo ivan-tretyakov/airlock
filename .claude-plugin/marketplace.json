@@ -1,6 +1,6 @@
 {
   "name": "airlock-marketplace",
-  "description": "Plan-driven multimodel task orchestration for Claude Code and OpenCode.",
+  "description": "Plan-driven multimodel task orchestration with headless executor dispatch.",
   "owner": {
     "name": "Ivan Tretyakov"
   },
@@ -8,8 +8,8 @@
     {
       "name": "airlock",
       "source": "./",
-      "description": "One plan file, slim roles, host-neutral audit, and native multimodel dispatch.",
-      "version": "4.0.1"
+      "description": "One plan file, slim roles, scoped audits, and headless executor dispatch.",
+      "version": "5.0.0"
     }
   ]
 }
