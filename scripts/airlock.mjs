@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,9 @@ const ROLES = new Set(["builder", "checker", "browser"]);
 const STATUSES = new Set(["todo", "doing", "blocked", "needs-you", "done"]);
 const DECISION_MODES = new Set(["assume", "block"]);
 const BLOCKING_CASES = new Set(["irreversible", "external", "access", "rework", "goal"]);
+const ROUTING_EXECUTORS = new Set(["claude", "codex", "opencode"]);
+const ROUTING_TIERS = new Set(["default", "expensive"]);
+const DEFAULT_ROUTING_TIMEOUT_MINUTES = 30;
 const LEGACY_OPENCODE_COMMAND_HASHES = new Set([
   "93a2001777ddc9dfb0ca02954f7b577d669d352704fbb47b07b1296ad0a9307e",
   "e0073a668602070e7cb2e9a78c916a75628848bcf2a23f2c8e930b8b69f54997",
@@ -572,10 +576,225 @@ function recoveryPaths(plan, task, root, planPath) {
   return preserve;
 }
 
+function startTask(root, planPath, plan, id, flags = {}) {
+  const task = taskById(plan, requireValue(id, "task id"));
+  if (task.status === "doing") {
+    if (planUpgraded) writePlan(planPath, plan);
+    return { task, resumed: true };
+  }
+  if (task.status !== "todo") throw new AirlockError(`task ${task.id} cannot start from ${task.status}`);
+  if (!dependenciesDone(plan, task)) throw new AirlockError(`task ${task.id} has unfinished dependencies`);
+  if (goalBlockingDecision(plan)) throw new AirlockError(`task ${task.id} is waiting on goal decision ${goalBlockingDecision(plan).id}`);
+  if (openDecisionsFor(plan, task.id).some((decision) => (decision.mode ?? "assume") === "block")) throw new AirlockError(`task ${task.id} is waiting on a blocking decision`);
+  const doing = plan.tasks.filter((item) => item.status === "doing");
+  if (doing.length && (!flags.parallel || doing.some((item) => ownsOverlap(item.owns, task.owns)))) throw new AirlockError(`task ${task.id} cannot start while ${doing.map((item) => item.id).join(", ")} is doing`);
+  assertCleanBoundary(root, planPath);
+  task.status = "doing";
+  task.startedAt = commandNow();
+  task.note = null;
+  for (const decision of openDecisionsFor(plan, task.id).filter((item) => (item.mode ?? "assume") === "assume")) {
+    if (!decision.consumedBy.includes(task.id)) decision.consumedBy.push(task.id);
+  }
+  writePlan(planPath, plan);
+  return { task, resumed: false };
+}
+
+function completeTask(root, planPath, plan, id, evidence) {
+  const task = taskById(plan, requireValue(id, "task id"));
+  const checkedEvidence = requireValue(evidence, "--evidence");
+  if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot complete from ${task.status}`);
+  const audit = auditTask(root, planPath, task, undefined, plan);
+  if (audit.outOfScope.length) throw new AirlockError(`audit failed; out-of-scope paths: ${audit.outOfScope.join(", ")}`);
+  const original = readFileSync(planPath, "utf8");
+  if (audit.inScope.length) git(root, ["add", "--", ...audit.inScope]);
+  task.diffLines = stagedDiffLines(root, audit.inScope);
+  task.status = "done";
+  task.evidence.push(checkedEvidence);
+  task.finishedAt = commandNow();
+  task.note = null;
+  writePlan(planPath, plan);
+  let commit;
+  try {
+    commit = commitTask(root, planPath, task, checkedEvidence, audit.inScope);
+  } catch (error) {
+    writeFileSync(planPath, original, "utf8");
+    git(root, ["reset", "--", relativePlan(root, planPath)]);
+    throw error;
+  }
+  return { task, commit, review: reviewState(plan) };
+}
+
+function blockTask(root, planPath, plan, id, reason) {
+  const task = taskById(plan, requireValue(id, "task id"));
+  const checkedReason = requireValue(reason, "--reason");
+  if (!["todo", "doing", "needs-you"].includes(task.status)) throw new AirlockError(`task ${task.id} cannot block from ${task.status}`);
+  const recovery = task.status === "doing" ? preservePaths(root, recoveryPaths(plan, task, root, planPath), "blocked", task.id) : null;
+  task.status = "blocked";
+  task.note = `${checkedReason}${recovery ? `; preserved at ${recovery}` : ""}`;
+  task.finishedAt = commandNow();
+  writePlan(planPath, plan);
+  return task;
+}
+
 function renderMarkdown(plan) {
   const rows = plan.tasks.map((task) => `| ${task.id} | ${task.title} | ${task.status} | ${task.role} |`).join("\n");
   const decisions = plan.decisions.filter((decision) => decision.status === "open").map((decision) => `- ${decisionSummary(decision)}`).join("\n") || "- None";
   return `# Airlock\n\n${statusText(plan)}\n\n## Tasks\n\n| ID | Task | State | Role |\n|---|---|---|---|\n${rows}\n\n## Decisions\n\n${decisions}\n`;
+}
+
+function defaultRoutingPath() {
+  return path.join(homedir(), ".airlock", "routing.json");
+}
+
+function validateRoutingSlot(slot, label) {
+  if (!slot || typeof slot !== "object" || Array.isArray(slot)) throw new AirlockError(`${label} must be an object`);
+  const unknown = Object.keys(slot).filter((key) => !["executor", "model", "effort"].includes(key));
+  if (unknown.length) throw new AirlockError(`${label} has unknown key: ${unknown[0]}`);
+  if (!ROUTING_EXECUTORS.has(slot.executor)) throw new AirlockError(`${label}.executor must be one of ${[...ROUTING_EXECUTORS].join(", ")}`);
+  if (!isNonEmptyString(slot.model)) throw new AirlockError(`${label}.model must be a non-empty string`);
+  if (slot.effort !== undefined && !isNonEmptyString(slot.effort)) throw new AirlockError(`${label}.effort must be a non-empty string when set`);
+  return slot;
+}
+
+function readRouting(routingPath) {
+  if (!existsSync(routingPath)) throw new AirlockError(`routing not found: ${routingPath}; write bindings.<role>.<tier> slots or pass --routing <path>`);
+  const doc = readJson(routingPath, "routing");
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) throw new AirlockError("routing must be a JSON object");
+  const unknownTop = Object.keys(doc).filter((key) => !["bindings", "timeoutMinutes"].includes(key));
+  if (unknownTop.length) throw new AirlockError(`routing has unknown key: ${unknownTop[0]}`);
+  if (!doc.bindings || typeof doc.bindings !== "object" || Array.isArray(doc.bindings)) throw new AirlockError("routing.bindings must be an object");
+  for (const role of Object.keys(doc.bindings)) {
+    if (!ROLES.has(role)) throw new AirlockError(`routing.bindings has unknown key: ${role}`);
+    const tiers = doc.bindings[role];
+    if (!tiers || typeof tiers !== "object" || Array.isArray(tiers)) throw new AirlockError(`routing.bindings.${role} must be an object`);
+    for (const tier of Object.keys(tiers)) {
+      if (!ROUTING_TIERS.has(tier)) throw new AirlockError(`routing.bindings.${role} has unknown key: ${tier}`);
+      validateRoutingSlot(tiers[tier], `routing.bindings.${role}.${tier}`);
+    }
+  }
+  if (doc.timeoutMinutes !== undefined && (typeof doc.timeoutMinutes !== "number" || !Number.isFinite(doc.timeoutMinutes) || doc.timeoutMinutes <= 0)) {
+    throw new AirlockError("routing.timeoutMinutes must be a positive number");
+  }
+  return { bindings: doc.bindings, timeoutMinutes: doc.timeoutMinutes ?? DEFAULT_ROUTING_TIMEOUT_MINUTES, path: routingPath };
+}
+
+function routingSlot(routing, role, tier) {
+  const slot = routing.bindings?.[role]?.[tier];
+  if (!slot) throw new AirlockError(`routing.bindings.${role}.${tier} is missing in ${routing.path}`);
+  return slot;
+}
+
+function executorInvocation(executor, model, effort, lastMessagePath) {
+  if (executor === "claude") {
+    return { command: "claude", args: ["--print", "--model", model, ...(effort !== undefined ? ["--effort", effort] : []), "--permission-mode", "bypassPermissions"], lastMessagePath: null };
+  }
+  if (executor === "codex") {
+    return { command: "codex", args: ["exec", "-m", model, ...(effort !== undefined ? ["-c", `model_reasoning_effort=${effort}`] : []), "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--output-last-message", lastMessagePath], lastMessagePath };
+  }
+  if (executor === "opencode") {
+    return { command: "opencode", args: ["run", "-m", model, ...(effort !== undefined ? ["--variant", effort] : []), "--auto"], lastMessagePath: null };
+  }
+  throw new AirlockError(`unknown executor: ${executor}`);
+}
+
+function workerPrompt(task, brief) {
+  return `${roleBody(task.role).trim()}\n\n${brief}`;
+}
+
+function spawnWorker(root, invocation, prompt, timeoutMinutes) {
+  const env = { ...process.env };
+  delete env.CLAUDE_CODE_SUBAGENT_MODEL;
+  return spawnSync(invocation.command, invocation.args, {
+    cwd: root,
+    encoding: "utf8",
+    input: prompt,
+    timeout: Math.max(1, Math.round(timeoutMinutes * 60_000)),
+    maxBuffer: 32 * 1024 * 1024,
+    env,
+    shell: process.platform === "win32",
+  });
+}
+
+function evidenceFromWorker(finalMessage) {
+  const lines = String(finalMessage ?? "").split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const match = lines.length ? lines.at(-1).match(/^EVIDENCE: (PASS|FAIL) (.+)$/) : null;
+  if (!match) return { pass: false, evidence: "worker returned no EVIDENCE line" };
+  return { pass: match[1] === "PASS", evidence: match[2].trim() };
+}
+
+function runPlan(root, planPath, flags) {
+  const routing = readRouting(flags.routing ? path.resolve(String(flags.routing)) : defaultRoutingPath());
+  const lines = [];
+  const results = [];
+  const emit = (line) => {
+    lines.push(line);
+    if (!flags.json) process.stdout.write(`${line}\n`);
+  };
+  while (true) {
+    const plan = readPlan(planPath);
+    const selection = nextText(root, plan);
+    if (selection.parked?.length) throw new AirlockError(`PARKED: ${selection.parked.map((item) => item.id).join(", ")}`, 2);
+    if (!selection.selected) {
+      emit(selection.text);
+      if (flags.json) output({ text: lines.join("\n"), results }, true);
+      return;
+    }
+    const task = selection.selected.task;
+    const slot = routingSlot(routing, task.role, isExpensive(task) ? "expensive" : "default");
+    const prompt = workerPrompt(task, selection.text);
+    const lastMessagePath = path.join(tmpdir(), `airlock-${task.id}-${process.pid}-${Date.now()}.txt`);
+    const invocation = executorInvocation(slot.executor, slot.model, slot.effort, lastMessagePath);
+    if (flags["dry-run"]) {
+      const commandLine = [invocation.command, ...invocation.args].join(" ");
+      const text = [`TASK ${task.id} · ${task.role} · ${slot.executor}`, `COMMAND ${commandLine}`, `PROMPT ${prompt.length} characters`].join("\n");
+      return output(flags.json ? { text, task: task.id, executor: slot.executor, command: commandLine, promptLength: prompt.length } : text, flags.json);
+    }
+    startTask(root, planPath, plan, task.id);
+    const worker = spawnWorker(root, invocation, prompt, routing.timeoutMinutes);
+    let reason = null;
+    if (worker.error?.code === "ETIMEDOUT" || (worker.status === null && worker.signal)) reason = `executor ${invocation.command} timed out after ${routing.timeoutMinutes} minutes`;
+    else if (worker.error) reason = `executor ${invocation.command} failed to start: ${worker.error.message}`;
+    else if (worker.status !== 0) {
+      const detail = (worker.stderr ?? "").trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
+      reason = `executor ${invocation.command} exited ${worker.status}${detail ? `: ${detail}` : ""}`;
+    }
+    let verdict = null;
+    if (!reason) {
+      let finalMessage = worker.stdout ?? "";
+      if (invocation.lastMessagePath && existsSync(invocation.lastMessagePath)) finalMessage = readFileSync(invocation.lastMessagePath, "utf8");
+      verdict = evidenceFromWorker(finalMessage);
+      if (!verdict.pass) reason = verdict.evidence;
+    }
+    if (invocation.lastMessagePath) rmSync(invocation.lastMessagePath, { force: true });
+    if (!reason) {
+      const audit = auditTask(root, planPath, task, undefined, plan);
+      if (audit.outOfScope.length) {
+        reason = [
+          `IN SCOPE${audit.inScope.length ? `\n${audit.inScope.map((item) => `  ${item}`).join("\n")}` : "\n  (none)"}`,
+          `OUT OF SCOPE\n${audit.outOfScope.map((item) => `  ${item}`).join("\n")}`,
+        ].join("\n");
+      }
+    }
+    if (reason) {
+      blockTask(root, planPath, plan, task.id, reason);
+      emit(`RAN ${task.id} BLOCKED ${reason}`);
+      results.push({ task: task.id, outcome: "blocked", reason });
+      process.exitCode = 1;
+      if (flags.json) output({ text: lines.join("\n"), results }, true);
+      return;
+    }
+    const completion = completeTask(root, planPath, plan, task.id, verdict.evidence);
+    if (completion.review) {
+      process.stderr.write(`REVIEW ${completion.review.used}/${completion.review.budget} lines\n`);
+      if (completion.review.exceeded) process.stderr.write("REVIEW BUDGET EXCEEDED: open the pull request now and start the next plan.\n");
+    }
+    emit(`RAN ${task.id} DONE ${completion.commit}`);
+    results.push({ task: task.id, outcome: "done", commit: completion.commit });
+    if (!flags.all) {
+      if (flags.json) output({ text: lines.join("\n"), results }, true);
+      return;
+    }
+  }
 }
 
 function roleSource(role) {
@@ -669,8 +888,9 @@ async function initPlan(root, planPath, goal, flags) {
 
 function help() {
   return [
-    "Usage: airlock <init|next|start|done|block|ask|answer|status|audit|render> [arguments] [--plan path] [--json]",
+    "Usage: airlock <init|next|start|run|done|block|ask|answer|status|audit|render> [arguments] [--plan path] [--json]",
     "init only: --host claude|opencode (opencode bootstraps .opencode/command and .opencode/agent files)",
+    "run only: --all (loop until nothing is runnable), --dry-run (print the resolved command), --routing <path> (default ~/.airlock/routing.json)",
   ].join("\n");
 }
 
@@ -698,25 +918,13 @@ async function main(argv = process.argv.slice(2)) {
     return output({ text: statusText(plan), plan, ...(review ? { review } : {}) }, flags.json);
   }
   if (command === "render") return output({ text: flags.md ? renderMarkdown(plan) : statusText(plan) }, flags.json);
+  if (command === "run") {
+    if (positional.length) throw new AirlockError(`run accepts no positional arguments: ${positional.join(" ")}`);
+    return runPlan(root, planPath, flags);
+  }
   if (command === "start") {
-    const task = taskById(plan, requireValue(positional[0], "task id"));
-    if (task.status === "doing") {
-      if (planUpgraded) writePlan(planPath, plan);
-      return output({ text: [`STARTED ${task.id} (resume)`, `AGENT ${taskAgent(task)}`].join("\n"), task, agent: taskAgent(task) }, flags.json);
-    }
-    if (task.status !== "todo") throw new AirlockError(`task ${task.id} cannot start from ${task.status}`);
-    if (!dependenciesDone(plan, task)) throw new AirlockError(`task ${task.id} has unfinished dependencies`);
-    if (goalBlockingDecision(plan)) throw new AirlockError(`task ${task.id} is waiting on goal decision ${goalBlockingDecision(plan).id}`);
-    if (openDecisionsFor(plan, task.id).some((decision) => (decision.mode ?? "assume") === "block")) throw new AirlockError(`task ${task.id} is waiting on a blocking decision`);
-    const doing = plan.tasks.filter((item) => item.status === "doing");
-    if (doing.length && (!flags.parallel || doing.some((item) => ownsOverlap(item.owns, task.owns)))) throw new AirlockError(`task ${task.id} cannot start while ${doing.map((item) => item.id).join(", ")} is doing`);
-    assertCleanBoundary(root, planPath);
-    task.status = "doing";
-    task.startedAt = commandNow();
-    task.note = null;
-    for (const decision of openDecisionsFor(plan, task.id).filter((item) => (item.mode ?? "assume") === "assume")) if (!decision.consumedBy.includes(task.id)) decision.consumedBy.push(task.id);
-    writePlan(planPath, plan);
-    return output({ text: [`STARTED ${task.id}`, `AGENT ${taskAgent(task)}`].join("\n"), task, agent: taskAgent(task) }, flags.json);
+    const started = startTask(root, planPath, plan, positional[0], flags);
+    return output({ text: [`STARTED ${started.task.id}${started.resumed ? " (resume)" : ""}`, `AGENT ${taskAgent(started.task)}`].join("\n"), task: started.task, agent: taskAgent(started.task) }, flags.json);
   }
   if (command === "audit") {
     const task = taskById(plan, requireValue(positional[0], "task id"));
@@ -733,43 +941,16 @@ async function main(argv = process.argv.slice(2)) {
     return output({ text, ...remaining, recovery }, flags.json);
   }
   if (command === "done") {
-    const task = taskById(plan, requireValue(positional[0], "task id"));
-    const evidence = requireValue(flags.evidence, "--evidence");
-    if (task.status !== "doing") throw new AirlockError(`task ${task.id} cannot complete from ${task.status}`);
-    const audit = auditTask(root, planPath, task, undefined, plan);
-    if (audit.outOfScope.length) throw new AirlockError(`audit failed; out-of-scope paths: ${audit.outOfScope.join(", ")}`);
-    const original = readFileSync(planPath, "utf8");
-    if (audit.inScope.length) git(root, ["add", "--", ...audit.inScope]);
-    task.diffLines = stagedDiffLines(root, audit.inScope);
-    task.status = "done";
-    task.evidence.push(evidence);
-    task.finishedAt = commandNow();
-    task.note = null;
-    writePlan(planPath, plan);
-    let commit;
-    try {
-      commit = commitTask(root, planPath, task, evidence, audit.inScope);
-    } catch (error) {
-      writeFileSync(planPath, original, "utf8");
-      git(root, ["reset", "--", relativePlan(root, planPath)]);
-      throw error;
+    const completion = completeTask(root, planPath, plan, positional[0], flags.evidence);
+    if (completion.review) {
+      process.stderr.write(`REVIEW ${completion.review.used}/${completion.review.budget} lines\n`);
+      if (completion.review.exceeded) process.stderr.write("REVIEW BUDGET EXCEEDED: open the pull request now and start the next plan.\n");
     }
-    const review = reviewState(plan);
-    if (review) {
-      process.stderr.write(`REVIEW ${review.used}/${review.budget} lines\n`);
-      if (review.exceeded) process.stderr.write("REVIEW BUDGET EXCEEDED: open the pull request now and start the next plan.\n");
-    }
-    return output({ text: `DONE ${task.id} ${commit}`, task, commit, ...(review ? { review } : {}) }, flags.json);
+    return output({ text: `DONE ${completion.task.id} ${completion.commit}`, task: completion.task, commit: completion.commit, ...(completion.review ? { review: completion.review } : {}) }, flags.json);
   }
   if (command === "block") {
-    const task = taskById(plan, requireValue(positional[0], "task id"));
     const reason = requireValue(flags.reason, "--reason");
-    if (!["todo", "doing", "needs-you"].includes(task.status)) throw new AirlockError(`task ${task.id} cannot block from ${task.status}`);
-    const recovery = task.status === "doing" ? preservePaths(root, recoveryPaths(plan, task, root, planPath), "blocked", task.id) : null;
-    task.status = "blocked";
-    task.note = `${reason}${recovery ? `; preserved at ${recovery}` : ""}`;
-    task.finishedAt = commandNow();
-    writePlan(planPath, plan);
+    const task = blockTask(root, planPath, plan, positional[0], reason);
     return output({ text: `BLOCKED ${task.id}: ${reason}`, task }, flags.json);
   }
   if (command === "ask") {

@@ -1,0 +1,40 @@
+Executor flag verification for Airlock 5.0 run (spec 2, 2026-09-04)
+Verified live on this Windows machine (executors resolved from PATH; host shell PowerShell 5.1).
+
+claude --help (Claude Code)
+  -p, --print                 Print response and exit
+  --model <model>             Model for the current session
+  --effort <level>            Effort level for the current session
+  --permission-mode <mode>    Permission mode to use for the session
+  Print mode accepts the prompt on stdin when no prompt argument is given.
+
+codex exec --help (Codex CLI)
+  Usage: codex exec [OPTIONS] [PROMPT]
+  [PROMPT]  "If not provided as an argument (or if `-` is used), instructions
+             are read from stdin."
+  -m, --model <MODEL>
+  -c, --config <key=value>    (used as -c model_reasoning_effort=<effort>)
+  --dangerously-bypass-approvals-and-sandbox
+  --skip-git-repo-check
+  -o, --output-last-message <FILE>
+                              "Specifies file where the last message from the
+                               agent should be written"
+
+opencode run --help (opencode CLI)
+  Usage: opencode run [message..]
+  -m, --model    model to use in the format of provider/model
+  --variant      model variant (provider-specific reasoning effort, e.g. high, max, minimal)
+  --auto         auto-approve permissions that are not explicitly denied (dangerous!)
+  Live probe: `opencode run -m invalid-probe/x --auto` with the prompt piped on
+  stdin and no message argument proceeds to session creation (it failed only on
+  the unknown model, non-interactively), so piped stdin is accepted as the
+  message source.
+
+Runner spawn decisions (Windows, PowerShell 5.1 host)
+- The worker prompt is passed on STDIN for all three executors and never
+  appears in argv, so the multiline prompt is never inline-quoted through a
+  shell; claude/codex/opencode all accept stdin as shown above.
+- spawnSync uses shell: true on Windows only, so npm .cmd shims (and the test
+  fakes) resolve; routing-validated model/effort values carry no spaces.
+- Timeout verified by probe: on expiry spawnSync returns error.code ETIMEDOUT,
+  status null, signal SIGTERM (the run treats that as the timeout cause).

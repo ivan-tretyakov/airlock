@@ -1,10 +1,8 @@
 ---
 description: Drive the active Airlock plan until no task is runnable.
-argument-hint: "[--unattended]"
+argument-hint: "[--all] [--dry-run] [--routing <path>]"
 ---
 
-Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" next $ARGUMENTS`. If it returns `PARKED`, show it and stop. If it prints `NOTHING TO DO`, show it, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" status`, and present all open decisions and assumptions in one multiple-choice prompt. Feed answers to `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" answer` and resume if work becomes runnable.
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" run $ARGUMENTS` and show the line it prints. Never dispatch a subagent: `run` resolves `~/.airlock/routing.json`, spawns the routed executor CLI itself, audits, and commits or blocks.
 
-Otherwise, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" start <id>` and dispatch its TASK to its exact `AGENT airlock-<role>` line with no model parameter. If dispatch errors, run it with `block <id> --reason "<cause>"`. After a child result, run it with `audit <id>`; block on failure, otherwise run it with `done <id> --evidence "<command + result>"`.
-
-Repeat until `NOTHING TO DO` or `BUDGET REACHED`. Do not ask while work is runnable; use `airlock ask ... --assume <default>` unless the decision is truly blocking. Report one line per completed task, the status table, and one consolidated prompt only.
+If it prints `RAN <id> DONE <commit>`, repeat. If it prints `RAN <id> BLOCKED <reason>`, stop and show the reason; fix the cause (usually one routing slot) and rerun. If it returns `PARKED` or `NOTHING TO DO`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" status`, present all open decisions and assumptions in one multiple-choice prompt, feed answers to `node "${CLAUDE_PLUGIN_ROOT}/scripts/airlock.mjs" answer`, and resume if work becomes runnable.
